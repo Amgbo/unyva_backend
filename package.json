@@ -2,7 +2,7 @@
   "name": "unyva-backend",
   "version": "1.0.0",
   "type": "module",
-  "main": "index.js",
+  "main": "dist/index.js",
   "scripts": {
     "dev": "nodemon --watch src --exec tsx src/index.ts",
     "dev:simple": "tsx src/index.ts",
@@ -11,10 +11,6 @@
     "check-db": "tsx check-students-table.ts",
     "test-registration": "tsx test-student-registration.ts"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
   "dependencies": {
     "bcrypt": "^6.0.0",
     "cloudinary": "^1.41.3",
