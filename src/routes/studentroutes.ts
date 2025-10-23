@@ -2,7 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import {
   registerStep1,
-  registerStep2,
+  completeRegistration,
   verifyEmail,
   loginStudent,
   getStudentProfile,
@@ -31,11 +31,11 @@ const upload = multer({
 // Step 1: Basic registration
 router.post('/register-step1', registerStep1);
 
-// Step 2: Complete registration with files
-router.post('/register-step2', upload.fields([
+// Complete registration: Single step with all data
+router.post('/complete-registration', upload.fields([
   { name: 'profile_picture', maxCount: 1 },
   { name: 'id_card', maxCount: 1 },
-]), registerStep2);
+]), completeRegistration);
 
 // Email verification
 router.get('/verify-email', verifyEmail);

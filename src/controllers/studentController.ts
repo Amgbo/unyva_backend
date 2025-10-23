@@ -32,11 +32,11 @@ if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
   console.log('⚠️ Email credentials not provided, email functionality disabled');
 }
 
-// STEP 1: Register Basic Info + Send Email Verification - UPDATED WITH HALL OF RESIDENCE
+// STEP 1: Validate Basic Info - NO DB INSERTION
 export const registerStep1 = async (req: Request, res: Response): Promise<void> => {
   console.log('🔵 REGISTER STEP 1 REQUEST RECEIVED');
   console.log('📦 Request body:', req.body);
-  
+
   const parsed = registerStep1Schema.safeParse(req.body);
 
   if (!parsed.success) {
@@ -88,7 +88,7 @@ export const registerStep1 = async (req: Request, res: Response): Promise<void> 
       }
     }
 
-    // Check if student already exists
+    // Check if student already exists (for validation only)
     console.log('🔍 Checking if student exists...');
     const exists = await pool.query(
       'SELECT * FROM students WHERE email = $1 OR student_id = $2',
@@ -107,100 +107,32 @@ export const registerStep1 = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
-    const verificationToken = crypto.randomBytes(32).toString('hex');
-
-    // Insert student with hall_of_residence and room_number
-   // 🔧 ADD THIS DATE CONVERSION RIGHT BEFORE THE INSERT QUERY:
-// Convert date from "DD-MM-YYYY" to "YYYY-MM-DD" for PostgreSQL
-const [day, month, year] = date_of_birth.split('-');
-const formattedDob = `${year}-${month}-${day}`;
-
-console.log('📅 Original date:', date_of_birth);
-console.log('📅 Formatted date for PostgreSQL:', formattedDob);
-
-const insertResult = await pool.query(
-  `INSERT INTO students
-    (student_id, email, first_name, last_name, phone, gender, date_of_birth, 
-     hall_of_residence, room_number, verification_token, is_verified, role, 
-     delivery_code, is_delivery_approved, university, program, graduation_year)
-   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-   RETURNING student_id, email, first_name, last_name, phone, role, university, program`,
-  [
-    student_id,
-    email,
-    first_name,
-    last_name,
-    phone,
-    gender,
-    formattedDob,  // ← USE THIS INSTEAD OF date_of_birth
-    hall_of_residence,
-    room_number,
-    verificationToken,
-    true,
-    role,
-    delivery_code,
-    role === 'delivery',
-    university,
-    program,
-    graduation_year
-  ]
-);
-
-    console.log('✅ Student inserted successfully:', insertResult.rows[0]);
-
-    // Mark delivery code as used if role is delivery
-    if (role === 'delivery' && delivery_code) {
-      await deliveryCodeManager.useCode(delivery_code, student_id);
-      console.log('✅ Delivery code marked as used:', delivery_code);
-    }
-
-    // Try to send verification email, but don't fail if it doesn't work
-    if (transporter) {
-      try {
-        const verifyLink = `${process.env.BASE_URL}/api/students/verify-email?token=${verificationToken}`;
-        await transporter.sendMail({
-          from: `"Unyva UG" <${process.env.EMAIL_USER}>`,
-          to: email,
-          subject: 'Verify your Unyva account',
-          html: `<p>Hello ${first_name},</p>
-                 <p>Please click the link below to verify your email:</p>
-                 <a href="${verifyLink}">${verifyLink}</a>`,
-        });
-        console.log('📧 Verification email sent to:', email);
-      } catch (emailError: any) {
-        console.log('⚠️ Email sending failed, but registration continues:', emailError?.message || 'Unknown error');
-        // Continue with registration even if email fails
-      }
-    } else {
-      console.log('⚠️ Email transporter not available, skipping email verification');
-    }
-
-    console.log('✅ REGISTRATION STEP 1 COMPLETED SUCCESSFULLY');
-    console.log('👤 Student registered:', student_id);
+    console.log('✅ REGISTRATION STEP 1 VALIDATION COMPLETED SUCCESSFULLY');
+    console.log('👤 Student validated:', student_id);
     console.log('🎯 Role:', role);
     console.log('🏠 Hall of residence:', hall_of_residence);
     if (room_number) console.log('🚪 Room number:', room_number);
     if (role === 'delivery') {
-      console.log('🚚 Delivery code used:', delivery_code);
+      console.log('🚚 Delivery code validated:', delivery_code);
     }
 
-    // Return success response with role information
-    res.status(201).json({
+    // Return success response with validation info (NO DB INSERTION)
+    res.status(200).json({
       success: true,
       student_id: student_id,
-      message: 'Step 1 saved successfully. Proceed to Step 2.',
+      message: 'Step 1 validated successfully. Proceed to Step 2.',
       student: {
-        student_id: insertResult.rows[0].student_id,
-        email: insertResult.rows[0].email,
-        first_name: insertResult.rows[0].first_name,
-        last_name: insertResult.rows[0].last_name,
-        role: insertResult.rows[0].role,
-        university: insertResult.rows[0].university,
-        program: insertResult.rows[0].program
+        student_id: student_id,
+        email: email,
+        first_name: first_name,
+        last_name: last_name,
+        role: role,
+        university: university,
+        program: program
       }
     });
   } catch (err: any) {
-    console.error('❌ Step 1 Database Error:', err);
+    console.error('❌ Step 1 Validation Error:', err);
     console.error('Error details:', {
       message: err.message,
       code: err.code,
@@ -208,39 +140,21 @@ const insertResult = await pool.query(
       table: err.table,
       constraint: err.constraint
     });
-    
-    // Provide more specific error messages
-    if (err.code === '23505') { // Unique violation
-      res.status(409).json({
-        error: 'Duplicate entry found',
-        details: err.detail
-      });
-    } else if (err.code === '23502') { // Not null violation
-      res.status(400).json({
-        error: 'Missing required field',
-        details: err.detail
-      });
-    } else if (err.code === '22P02') { // Invalid text representation
-      res.status(400).json({
-        error: 'Invalid data format',
-        details: err.detail
-      });
-    } else {
-      res.status(500).json({
-        error: 'Step 1 registration failed',
-        message: err.message,
-        code: err.code
-      });
-    }
+
+    res.status(500).json({
+      error: 'Step 1 validation failed',
+      message: err.message,
+      code: err.code
+    });
   }
 };
 
-// STEP 2: Upload Profile Picture + ID + Password - NO CHANGES NEEDED
-export const registerStep2 = async (req: Request, res: Response): Promise<void> => {
-  console.log('🔵 REGISTER STEP 2 REQUEST RECEIVED');
+// COMPLETE REGISTRATION: Single INSERT with all data from Step 1 + Step 2
+export const completeRegistration = async (req: Request, res: Response): Promise<void> => {
+  console.log('🔵 COMPLETE REGISTRATION REQUEST RECEIVED');
   console.log('📦 Request body:', req.body);
   console.log('🖼 Files received:', req.files ? Object.keys(req.files) : 'No files');
-  
+
   if (req.files) {
     const files = req.files as { [fieldname: string]: Express.Multer.File[] };
     console.log('📸 Profile picture:', files['profile_picture']?.[0]?.filename || 'Not received');
@@ -266,21 +180,37 @@ export const registerStep2 = async (req: Request, res: Response): Promise<void> 
     return;
   }
 
-  const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+  // Extract all Step 1 data from request body (should be sent from frontend)
+  const {
+    student_id,
+    email,
+    first_name,
+    last_name,
+    phone,
+    gender,
+    date_of_birth,
+    hall_of_residence,
+    room_number = null,
+    role = 'buyer_seller',
+    delivery_code = null,
+    university = null,
+    program = null,
+    graduation_year = null,
+  } = req.body;
 
+  if (!student_id || !email || !first_name || !last_name || !phone || !gender || !date_of_birth || !hall_of_residence) {
+    console.log('❌ Missing required fields from Step 1');
+    res.status(400).json({ error: 'Missing required registration data from Step 1.' });
+    return;
+  }
+
+  const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
   const profilePicFile = files?.['profile_picture']?.[0];
   const idCardFile = files?.['id_card']?.[0];
 
   // For testing purposes, make files optional
   if (!profilePicFile || !idCardFile) {
     console.log('⚠️ No files provided - this is allowed for testing');
-  }
-
-  const student_id = req.body.student_id;
-  if (!student_id) {
-    console.log('❌ Missing student ID');
-    res.status(400).json({ error: 'Missing student ID in form data.' });
-    return;
   }
 
   try {
@@ -311,38 +241,116 @@ export const registerStep2 = async (req: Request, res: Response): Promise<void> 
       console.log('🆔 ID card uploaded to ImageKit:', idCardUrl);
     }
 
-    console.log('💾 Updating student record in database...');
-    const result = await pool.query(
-      `UPDATE students
-       SET password = $1, profile_picture = $2, id_card = $3, registration_complete = TRUE
-       WHERE student_id = $4
-       RETURNING *`,
+    // Convert date from "DD-MM-YYYY" to "YYYY-MM-DD" for PostgreSQL
+    const [day, month, year] = date_of_birth.split('-');
+    const formattedDob = `${year}-${month}-${day}`;
+
+    console.log('📅 Original date:', date_of_birth);
+    console.log('📅 Formatted date for PostgreSQL:', formattedDob);
+
+    const verificationToken = crypto.randomBytes(32).toString('hex');
+
+    console.log('💾 Inserting complete student record into database...');
+    const insertResult = await pool.query(
+      `INSERT INTO students
+        (student_id, email, first_name, last_name, phone, gender, date_of_birth,
+         hall_of_residence, room_number, password, profile_picture, id_card,
+         verification_token, is_verified, role, delivery_code, is_delivery_approved,
+         university, program, graduation_year, registration_complete)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+       RETURNING student_id, email, first_name, last_name, phone, role, university, program`,
       [
+        student_id,
+        email,
+        first_name,
+        last_name,
+        phone,
+        gender,
+        formattedDob,
+        hall_of_residence,
+        room_number,
         hashedPassword,
         profilePictureUrl,
         idCardUrl,
-        student_id,
+        verificationToken,
+        true, // is_verified
+        role,
+        delivery_code,
+        role === 'delivery', // is_delivery_approved
+        university,
+        program,
+        graduation_year,
+        true, // registration_complete
       ]
     );
 
-    if (result.rows.length === 0) {
-      console.log('❌ Student not found in database:', student_id);
-      res.status(404).json({ error: 'Student not found. Please complete step 1 first.' });
-      return;
+    console.log('✅ Student registration completed successfully:', insertResult.rows[0]);
+
+    // Mark delivery code as used if role is delivery
+    if (role === 'delivery' && delivery_code) {
+      await deliveryCodeManager.useCode(delivery_code, student_id);
+      console.log('✅ Delivery code marked as used:', delivery_code);
     }
 
-    console.log('✅ REGISTRATION STEP 2 COMPLETED SUCCESSFULLY');
+    // Try to send verification email, but don't fail if it doesn't work
+    if (transporter) {
+      try {
+        const verifyLink = `${process.env.BASE_URL}/api/students/verify-email?token=${verificationToken}`;
+        await transporter.sendMail({
+          from: `"Unyva UG" <${process.env.EMAIL_USER}>`,
+          to: email,
+          subject: 'Verify your Unyva account',
+          html: `<p>Hello ${first_name},</p>
+                 <p>Please click the link below to verify your email:</p>
+                 <a href="${verifyLink}">${verifyLink}</a>`,
+        });
+        console.log('📧 Verification email sent to:', email);
+      } catch (emailError: any) {
+        console.log('⚠️ Email sending failed, but registration continues:', emailError?.message || 'Unknown error');
+        // Continue with registration even if email fails
+      }
+    } else {
+      console.log('⚠️ Email transporter not available, skipping email verification');
+    }
+
+    console.log('✅ COMPLETE REGISTRATION FINISHED SUCCESSFULLY');
     console.log('👤 Student ID:', student_id);
     console.log('📸 Profile picture saved:', profilePicFile?.filename || 'No file uploaded');
     console.log('🆔 ID card saved:', idCardFile?.filename || 'No file uploaded');
-    
-    res.status(200).json({
+    console.log('🎯 Role:', role);
+    console.log('🏠 Hall of residence:', hall_of_residence);
+    if (room_number) console.log('🚪 Room number:', room_number);
+    if (role === 'delivery') {
+      console.log('🚚 Delivery code used:', delivery_code);
+    }
+
+    res.status(201).json({
       message: 'Registration completed successfully!',
-      student: result.rows[0]
+      student: insertResult.rows[0]
     });
-  } catch (err) {
-    console.error('❌ Step 2 Error:', err);
-    res.status(500).json({ error: 'Step 2 registration failed' });
+  } catch (err: any) {
+    console.error('❌ Complete Registration Error:', err);
+    console.error('Error details:', {
+      message: err.message,
+      code: err.code,
+      detail: err.detail,
+      table: err.table,
+      constraint: err.constraint
+    });
+
+    // Handle duplicate student_id with 409 response
+    if (err.code === '23505') { // Unique violation
+      res.status(409).json({
+        error: 'Student with this email or student ID already exists.',
+        details: err.detail
+      });
+    } else {
+      res.status(500).json({
+        error: 'Registration failed',
+        message: err.message,
+        code: err.code
+      });
+    }
   }
 };
 

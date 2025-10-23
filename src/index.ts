@@ -81,6 +81,7 @@ app.use("/api/images", imageRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/university', universityHallRoutes);
 app.use('/api/students', studentRoutes);
+console.log('✅ Student routes registered at /api/students');
 app.use('/api/home', homeRoutes);
 app.use("/api/cart", cartRoutes);
 app.use('/api/admin', adminRoutes);
