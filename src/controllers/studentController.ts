@@ -9,6 +9,7 @@ import {
   registerStep2Schema,
 } from '../validators/studentValidator.js';
 import { deliveryCodeManager } from '../utils/DeliveryCodeManager.js';
+import imagekit from '../config/imagekit.js';
 
 // Email transporter (Gmail) - Initialize only if credentials are provided
 let transporter: any = null;
@@ -286,16 +287,40 @@ export const registerStep2 = async (req: Request, res: Response): Promise<void> 
     console.log('🔐 Hashing password for student:', student_id);
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    // Upload profile picture and ID card to ImageKit if provided
+    let profilePictureUrl = null;
+    let idCardUrl = null;
+
+    if (profilePicFile) {
+      const profileResult = await imagekit.upload({
+        file: profilePicFile.buffer,
+        fileName: `${student_id}-profile-${Date.now()}.jpg`,
+        folder: "/unyva_profiles",
+      });
+      profilePictureUrl = profileResult.url;
+      console.log('📸 Profile picture uploaded to ImageKit:', profilePictureUrl);
+    }
+
+    if (idCardFile) {
+      const idCardResult = await imagekit.upload({
+        file: idCardFile.buffer,
+        fileName: `${student_id}-idcard-${Date.now()}.jpg`,
+        folder: "/unyva_idcards",
+      });
+      idCardUrl = idCardResult.url;
+      console.log('🆔 ID card uploaded to ImageKit:', idCardUrl);
+    }
+
     console.log('💾 Updating student record in database...');
     const result = await pool.query(
       `UPDATE students
-       SET password = $1, profile_picture = $2, id_card = $3
+       SET password = $1, profile_picture = $2, id_card = $3, registration_complete = TRUE
        WHERE student_id = $4
        RETURNING *`,
       [
         hashedPassword,
-        profilePicFile ? `/uploads/${profilePicFile.filename}` : null,
-        idCardFile ? `/uploads/${idCardFile.filename}` : null,
+        profilePictureUrl,
+        idCardUrl,
         student_id,
       ]
     );
@@ -521,7 +546,7 @@ export const updateStudentProfile = async (req: any, res: Response): Promise<voi
     });
 
     // Handle profile picture upload - with upload.any(), files are in req.files
-    let profilePicturePath = null;
+    let profilePictureUrl = null;
     if (req.files && req.files.length > 0) {
       console.log('📁 Files found:', req.files.length);
       req.files.forEach((file: Express.Multer.File, index: number) => {
@@ -529,8 +554,14 @@ export const updateStudentProfile = async (req: any, res: Response): Promise<voi
       });
       const profilePicFile = req.files.find((file: Express.Multer.File) => file.fieldname === 'profile_picture');
       if (profilePicFile) {
-        profilePicturePath = `/uploads/${profilePicFile.filename}`;
-        console.log('📸 Profile picture found:', profilePicturePath);
+        // Upload to ImageKit
+        const profileResult = await imagekit.upload({
+          file: profilePicFile.buffer,
+          fileName: `${studentIdFromToken}-profile-${Date.now()}.jpg`,
+          folder: "/unyva_profiles",
+        });
+        profilePictureUrl = profileResult.url;
+        console.log('📸 Profile picture uploaded to ImageKit:', profilePictureUrl);
       } else {
         console.log('⚠️ No profile_picture file found in req.files');
       }
@@ -603,9 +634,9 @@ export const updateStudentProfile = async (req: any, res: Response): Promise<voi
         values.push(room_number);
       }
     }
-    if (profilePicturePath !== null) {
+    if (profilePictureUrl !== null) {
       updateFields.push(`profile_picture = $${paramIndex++}`);
-      values.push(profilePicturePath);
+      values.push(profilePictureUrl);
     }
 
     if (updateFields.length === 0) {

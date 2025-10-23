@@ -1,8 +1,7 @@
 // src/controllers/imageController.ts
 import { Request, Response } from 'express';
+import imagekit from '../config/imagekit.js';
 import path from 'path';
-import fs from 'fs';
-import { promisify } from 'util';
 
 // Configure upload limits and validation
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
@@ -43,11 +42,6 @@ export const uploadProductImage = async (req: Request, res: Response): Promise<v
 
     const validation = validateImageFile(req.file);
     if (!validation.isValid) {
-      // Clean up uploaded file if validation fails
-      if (req.file.path) {
-        fs.unlinkSync(req.file.path);
-      }
-
       res.status(400).json({
         success: false,
         error: validation.error
@@ -55,8 +49,13 @@ export const uploadProductImage = async (req: Request, res: Response): Promise<v
       return;
     }
 
-    // Generate public URL for the uploaded image
-    const imageUrl = `/uploads/${req.file.filename}`;
+    // Upload to ImageKit
+    const result = await imagekit.upload({
+      file: req.file.buffer,
+      fileName: `${Date.now()}-${req.file.originalname}`,
+      folder: "/unyva_uploads",
+    });
+    const imageUrl = result.url;
 
     res.status(201).json({
       success: true,
@@ -71,11 +70,6 @@ export const uploadProductImage = async (req: Request, res: Response): Promise<v
     });
   } catch (error) {
     console.error('❌ Error uploading image:', error);
-
-    // Clean up file if error occurs
-    if (req.file?.path) {
-      fs.unlinkSync(req.file.path);
-    }
 
     res.status(500).json({
       success: false,
@@ -123,14 +117,16 @@ export const uploadMultipleProductImages = async (req: Request, res: Response): 
 
       if (!validation.isValid) {
         errors.push(`${file.originalname}: ${validation.error}`);
-        // Clean up invalid file
-        if (file.path) {
-          fs.unlinkSync(file.path);
-        }
         continue;
       }
 
-      const imageUrl = `/uploads/${file.filename}`;
+      // Upload to ImageKit
+      const result = await imagekit.upload({
+        file: file.buffer,
+        fileName: `${Date.now()}-${file.originalname}`,
+        folder: "/unyva_uploads",
+      });
+      const imageUrl = result.url;
       uploadedImages.push({
         filename: file.filename,
         originalName: file.originalname,
@@ -161,15 +157,6 @@ export const uploadMultipleProductImages = async (req: Request, res: Response): 
   } catch (error) {
     console.error('❌ Error uploading multiple images:', error);
 
-    // Clean up all uploaded files if error occurs
-    if (req.files && Array.isArray(req.files)) {
-      for (const file of req.files) {
-        if (file.path) {
-          fs.unlinkSync(file.path);
-        }
-      }
-    }
-
     res.status(500).json({
       success: false,
       error: 'Failed to upload images',
@@ -191,20 +178,8 @@ export const deleteProductImage = async (req: Request, res: Response): Promise<v
       return;
     }
 
-    // Construct file path
-    const filePath = path.join(process.cwd(), 'uploads', filename);
-
-    // Check if file exists
-    if (!fs.existsSync(filePath)) {
-      res.status(404).json({
-        success: false,
-        error: 'Image not found'
-      });
-      return;
-    }
-
-    // Delete the file
-    fs.unlinkSync(filePath);
+    // Delete from ImageKit using fileId (assuming filename is the fileId)
+    await imagekit.deleteFile(filename);
 
     res.status(200).json({
       success: true,
@@ -233,27 +208,20 @@ export const getImageInfo = async (req: Request, res: Response): Promise<void> =
       return;
     }
 
-    const filePath = path.join(process.cwd(), 'uploads', filename);
-
-    if (!fs.existsSync(filePath)) {
-      res.status(404).json({
-        success: false,
-        error: 'Image not found'
-      });
-      return;
-    }
-
-    const stats = fs.statSync(filePath);
-    const imageUrl = `/uploads/${filename}`;
+    // Get image info from ImageKit (assuming filename is fileId)
+    const result = await imagekit.getFileDetails(filename);
 
     res.status(200).json({
       success: true,
       data: {
         filename,
-        url: imageUrl,
-        size: stats.size,
-        createdAt: stats.birthtime,
-        modifiedAt: stats.mtime
+        url: result.url,
+        size: result.size,
+        createdAt: new Date(result.createdAt),
+        modifiedAt: new Date(result.createdAt),
+        width: result.width,
+        height: result.height,
+        format: result.fileType
       }
     });
   } catch (error) {
