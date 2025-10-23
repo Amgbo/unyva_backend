@@ -7,7 +7,7 @@ export interface ProductReview {
   rating: number;
   title: string;
   comment: string;
-  is_verified_purchase: boolean;
+  is_verified: boolean;
   created_at: Date;
   updated_at?: Date;
   parent_id?: number;
@@ -40,7 +40,7 @@ export class ReviewModel {
         rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
         title VARCHAR(255),
         comment TEXT,
-        is_verified_purchase BOOLEAN DEFAULT FALSE,
+        is_verified BOOLEAN DEFAULT FALSE,
         order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
         parent_id INTEGER REFERENCES product_reviews(id) ON DELETE CASCADE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -79,7 +79,7 @@ export class ReviewModel {
         pr.rating,
         pr.title,
         pr.comment,
-        pr.is_verified_purchase,
+        pr.is_verified,
         pr.created_at,
         pr.updated_at,
         pr.parent_id,
@@ -101,7 +101,7 @@ export class ReviewModel {
         pr.rating,
         pr.title,
         pr.comment,
-        pr.is_verified_purchase,
+        pr.is_verified,
         pr.created_at,
         pr.updated_at,
         pr.parent_id,
@@ -178,7 +178,7 @@ export class ReviewModel {
     }
 
     const query = `
-      INSERT INTO product_reviews (product_id, student_id, rating, title, comment, is_verified_purchase, order_id, parent_id)
+      INSERT INTO product_reviews (product_id, student_id, rating, title, comment, is_verified, order_id, parent_id)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING *
     `;

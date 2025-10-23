@@ -21,6 +21,7 @@ import serviceRoutes from './routes/serviceRoutes.js';
 import deliveryRoutes from './routes/deliveryRoutes.js';
 import orderRoutes from './routes/orderRoutes.js';
 import reviewRoutes from './routes/reviewRoutes.js';
+import { announcementRouter as announcementRoutes } from './routes/announcementRoutes.js';
 
 // Initialize app
 const app = express();
@@ -89,11 +90,13 @@ app.use('/api/services', serviceRoutes);
 app.use('/api/deliveries', deliveryRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/reviews', reviewRoutes);
+app.use('/api/announcements', announcementRoutes);
 
 console.log('✅ Admin routes registered at /api/admin');
 console.log('✅ Delivery routes registered at /api/deliveries');
 console.log('✅ Order routes registered at /api/orders');
 console.log('✅ Review routes registered at /api/reviews');
+console.log('✅ Announcement routes registered at /api/announcements');
 
 // Root sanity check
 app.get('/', (_: Request, res: Response) => {
