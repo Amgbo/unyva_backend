@@ -1,42 +1,23 @@
-# TODO: Replace Cloudinary with ImageKit
+# TODO: Fix Registration Form Submission (404 Error)
 
-## Dependencies
-- [ ] Remove cloudinary and multer-storage-cloudinary from package.json
-- [ ] Install imagekit, multer, @types/multer
+## Analysis
+- Frontend sends POST to /api/students/complete-registration
+- Backend returns 404 HTML error page instead of JSON
+- Route exists in code but may not be deployed on Railway
+- Frontend error handling needs improvement for HTML responses
 
-## Configuration
-- [ ] Create src/config/imagekit.ts with ImageKit instance
-- [ ] Update .env with IMAGEKIT_PUBLIC_KEY, IMAGEKIT_PRIVATE_KEY, IMAGEKIT_URL_ENDPOINT
+## Backend Tasks
+- [ ] Verify completeRegistration route is in studentroutes.ts ✅ (Already exists)
+- [ ] Verify completeRegistration controller handles FormData ✅ (Already implemented)
+- [ ] Deploy updated backend code to Railway
+- [ ] Test route accessibility on deployed backend
 
-## Middleware & Routes
-- [ ] Update src/middleware/upload.ts to use multer.memoryStorage()
-- [ ] Update src/routes/imageRoutes.ts to use memory storage
-- [ ] Update src/routes/studentroutes.ts to use memory storage
-- [ ] Update middleware/multer.ts if needed
-
-## Controllers
-- [ ] Update src/controllers/imageController.ts to use ImageKit upload API
-- [ ] Update src/controllers/studentController.ts to use ImageKit for profile uploads
-
-## Cleanup
-- [ ] Remove src/config/cloudinary.ts
-- [ ] Remove local uploads folder if unused
-- [ ] Test TypeScript compilation
-- [ ] Test image upload functionality
-
-# TODO: Update Registration Flow - Single Insert in Step 2
-
-## Backend Changes
-- [x] Modify `registerStep1` in studentController.ts to remove DB insertion
-- [x] Rename/update `registerStep2` to `completeRegistration` with single INSERT
-- [x] Update routes/studentroutes.ts to use new controller function
-- [x] Handle duplicate student_id with 409 response in completeRegistration
-
-## Frontend Changes
-- [x] Ensure register-step2.tsx sends all context data in form submission
-- [x] Update API call to use new endpoint if route changes
+## Frontend Tasks
+- [ ] Improve error handling in register-step2.tsx to always log raw response text
+- [ ] Ensure FormData is sent correctly (already done)
+- [ ] Test submission after backend deployment
 
 ## Testing
-- [ ] Test complete registration flow end-to-end
-- [ ] Verify duplicate student_id handling
-- [ ] Confirm images upload to ImageKit and URLs saved
+- [ ] Submit registration form after fixes
+- [ ] Verify 200 response with JSON
+- [ ] Confirm images uploaded and student created
