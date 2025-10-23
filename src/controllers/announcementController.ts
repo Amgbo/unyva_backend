@@ -28,18 +28,14 @@ export const getAnnouncements = async (req: Request, res: Response): Promise<voi
   try {
     console.log('📢 Fetching announcements...');
 
-    // For now, return dummy data. Later replace with database query
-    // const result = await pool.query(
-    //   'SELECT id, title, content, created_at FROM announcements ORDER BY created_at DESC'
-    // );
-
-    // Simulate database delay
-    await new Promise(resolve => setTimeout(resolve, 100));
+    const result = await pool.query(
+      'SELECT id, title, content, created_by, created_at FROM announcements ORDER BY created_at DESC'
+    );
 
     console.log('✅ Announcements fetched successfully');
     res.status(200).json({
       success: true,
-      announcements: dummyAnnouncements
+      announcements: result.rows
     });
   } catch (err: any) {
     console.error('❌ Get Announcements Error:', err);
@@ -77,27 +73,17 @@ export const addAnnouncement = async (req: any, res: Response): Promise<void> =>
 
     console.log('✅ Admin access verified for student:', studentId);
 
-    // For now, just add to dummy data. Later replace with database insert
-    const newAnnouncement = {
-      id: dummyAnnouncements.length + 1,
-      title,
-      content,
-      created_at: new Date().toISOString()
-    };
-
-    dummyAnnouncements.unshift(newAnnouncement); // Add to beginning of array
-
-    // Database insert would be:
-    // const result = await pool.query(
-    //   'INSERT INTO announcements (title, content, created_by) VALUES ($1, $2, $3) RETURNING *',
-    //   [title, content, studentId]
-    // );
+    // Insert into database
+    const result = await pool.query(
+      'INSERT INTO announcements (title, content, created_by) VALUES ($1, $2, $3) RETURNING *',
+      [title, content, studentId]
+    );
 
     console.log('✅ Announcement added successfully');
     res.status(201).json({
       success: true,
       message: 'Announcement posted successfully',
-      announcement: newAnnouncement
+      announcement: result.rows[0]
     });
   } catch (err: any) {
     console.error('❌ Add Announcement Error:', err);
