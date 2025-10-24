@@ -528,7 +528,7 @@ export const confirmDelivered = async (req: AuthRequest, res: Response): Promise
     if (checkResult.rows.length === 0) {
       res.status(404).json({
         success: false,
-        error: 'Product not found or not in reserved status'
+        error: 'Product not found or not in pending status'
       });
       return;
     }

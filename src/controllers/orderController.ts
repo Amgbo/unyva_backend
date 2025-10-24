@@ -86,13 +86,14 @@ export const createOrder = async (req: Request, res: Response): Promise<void> =>
       const orderResult = await client.query(orderQuery, orderValues);
       const order = orderResult.rows[0];
 
-      // Update product status to 'pending' after order creation
+      // Update product status to 'pending' for delivery or 'sold' for pickup after order creation
+      const productStatus = delivery_option === 'delivery' ? 'pending' : 'sold';
       const updateProductStatusQuery = `
         UPDATE products
-        SET status = 'pending', updated_at = CURRENT_TIMESTAMP
-        WHERE id = $1
+        SET status = $1, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2
       `;
-      await client.query(updateProductStatusQuery, [product_id]);
+      await client.query(updateProductStatusQuery, [productStatus, product_id]);
 
       // Create delivery request if delivery is selected
       if (delivery_option === 'delivery') {

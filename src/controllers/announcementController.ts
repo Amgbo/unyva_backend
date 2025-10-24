@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { pool } from '../db.js';
+import imagekit from '../config/imagekit.js';
 
 // Dummy announcements data for initial testing
 const dummyAnnouncements = [
@@ -53,6 +54,7 @@ export const addAnnouncement = async (req: any, res: Response): Promise<void> =>
 
     const { title, content } = req.body;
     const studentId = req.user?.student_id;
+    let imageUrl: string | null = null;
 
     // Validate required fields
     if (!title || !content) {
@@ -73,10 +75,42 @@ export const addAnnouncement = async (req: any, res: Response): Promise<void> =>
 
     console.log('✅ Admin access verified for student:', studentId);
 
+    // Handle image upload if provided
+    if (req.file) {
+      console.log('📸 Processing image upload...');
+
+      // Validate image file (reuse logic from imageController)
+      const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+      const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+
+      if (req.file.size > MAX_FILE_SIZE) {
+        res.status(400).json({
+          error: 'File size too large. Maximum size is 5MB.'
+        });
+        return;
+      }
+
+      if (!ALLOWED_IMAGE_TYPES.includes(req.file.mimetype)) {
+        res.status(400).json({
+          error: 'Invalid file type. Only JPEG, PNG, and WebP images are allowed.'
+        });
+        return;
+      }
+
+      // Upload to ImageKit
+      const result = await imagekit.upload({
+        file: req.file.buffer,
+        fileName: `announcement-${Date.now()}-${req.file.originalname}`,
+        folder: "/unyva_announcements",
+      });
+      imageUrl = result.url;
+      console.log('✅ Image uploaded successfully:', imageUrl);
+    }
+
     // Insert into database
     const result = await pool.query(
-      'INSERT INTO announcements (title, content, created_by) VALUES ($1, $2, $3) RETURNING *',
-      [title, content, studentId]
+      'INSERT INTO announcements (title, content, created_by, image_url) VALUES ($1, $2, $3, $4) RETURNING *',
+      [title, content, studentId, imageUrl]
     );
 
     console.log('✅ Announcement added successfully');

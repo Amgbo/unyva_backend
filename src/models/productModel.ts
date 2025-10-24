@@ -12,7 +12,7 @@ export interface Product {
   contact_method: 'WhatsApp' | 'Call' | 'SMS' | 'in_app';
   hall_id?: number;
   room_number?: string;
-  status: 'draft' | 'available' | 'pending' | 'sold' | 'archived';
+  status: 'draft' | 'available' | 'pending' | 'reserved' | 'sold' | 'archived';
   is_approved: boolean;
   view_count: number;
   price_negotiable: boolean;
@@ -106,7 +106,7 @@ export const getAllProducts = async (excludeStudentId?: string): Promise<Product
       LEFT JOIN university_halls h ON p.hall_id = h.id
       LEFT JOIN students s ON p.student_id = s.student_id
       LEFT JOIN product_images pi ON p.id = pi.product_id
-      WHERE p.status = 'available' AND p.is_approved = true
+      WHERE p.status IN ('available', 'sold', 'pending') AND p.is_approved = true
     `;
 
     const values: any[] = [];
@@ -434,7 +434,7 @@ export const searchProducts = async (searchParams: {
       LEFT JOIN university_halls h ON p.hall_id = h.id
       LEFT JOIN students s ON p.student_id = s.student_id
       LEFT JOIN product_images pi ON p.id = pi.product_id
-      WHERE p.status = 'available' AND p.is_approved = true
+      WHERE p.status IN ('available', 'sold', 'pending') AND p.is_approved = true
     `;
 
     const values: any[] = [searchParams.query];
