@@ -5,12 +5,12 @@ import { pool } from '../db.js';
 import { ReviewModel, ProductReview, CreateReviewData } from '../models/reviewModel.js';
 
 // GET: Get all reviews for a product (with nested replies)
-export const getProductReviews = async (req: Request<{ id: string }>, res: Response): Promise<void> => {
+export const getProductReviews = async (req: Request<{ productId: string }>, res: Response): Promise<void> => {
   try {
-    const { id } = req.params;
-    const productId = parseInt(id, 10);
+    const { productId } = req.params;
+    const productIdNum = parseInt(productId, 10);
 
-    if (isNaN(productId)) {
+    if (isNaN(productIdNum)) {
       res.status(400).json({
         success: false,
         error: 'Invalid product ID'
@@ -18,7 +18,11 @@ export const getProductReviews = async (req: Request<{ id: string }>, res: Respo
       return;
     }
 
-    const result = await ReviewModel.getProductReviews(productId);
+    // Extract pagination parameters from query
+    const page = parseInt(req.query.page as string, 10) || 1;
+    const limit = parseInt(req.query.limit as string, 10) || 10;
+
+    const result = await ReviewModel.getProductReviews(productIdNum, page, limit);
 
     res.status(200).json({
       success: true,
