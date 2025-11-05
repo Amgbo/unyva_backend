@@ -3,6 +3,7 @@ import { verifyToken } from '../middleware/authMiddleware.js';
 import { getFeaturedProducts, getAllProducts, getRecentProducts } from '../models/productModel.js';
 import { getProductCategories } from '../models/categoryModel.js';
 import { getFeaturedServices, getRecentServices } from '../models/serviceModel.js';
+import { pool } from '../db.js';
 
 const router = Router();
 
@@ -13,11 +14,25 @@ router.get('/', async (req: Request, res: Response) => {
     const limit = parseInt(req.query.limit as string) || 20;
     const offset = (page - 1) * limit;
 
-    // Fetch real banners (keeping as is for now, can be updated later)
-    const banners = [
-      { id: '1', img: 'https://picsum.photos/800/300', title: 'Big Sale' },
-      { id: '2', img: 'https://picsum.photos/800/301', title: 'Student Discounts' },
-    ];
+    // Fetch announcements with images as banners
+    const announcementsResult = await pool.query(
+      'SELECT id, title, content, image_url, created_at FROM announcements WHERE image_url IS NOT NULL ORDER BY created_at DESC LIMIT 5'
+    );
+    const banners = announcementsResult.rows.map(announcement => ({
+      id: announcement.id.toString(),
+      img: announcement.image_url,
+      title: announcement.title,
+      content: announcement.content,
+      created_at: announcement.created_at
+    }));
+
+    // If no announcements with images, fall back to dummy banners
+    if (banners.length === 0) {
+      banners.push(
+        { id: '1', img: 'https://picsum.photos/800/300', title: 'Big Sale', content: '', created_at: new Date().toISOString() },
+        { id: '2', img: 'https://picsum.photos/800/301', title: 'Student Discounts', content: '', created_at: new Date().toISOString() }
+      );
+    }
 
     // Fetch real categories from database
     const categories = await getProductCategories();
