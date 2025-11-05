@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import path from 'path';
-import { getAnnouncements, addAnnouncement } from '../controllers/announcementController.js';
+import { getAnnouncements, getAnnouncementById, addAnnouncement } from '../controllers/announcementController.js';
 import { authMiddleware } from '../middleware/authMiddleware.js';
 
 // File filter for images
@@ -32,6 +32,9 @@ const router = Router();
 
 // GET /api/announcements - Fetch all announcements (public)
 router.get('/', getAnnouncements);
+
+// GET /api/announcements/:id - Fetch single announcement by ID (public)
+router.get('/:id', getAnnouncementById);
 
 // POST /api/announcements - Add new announcement (protected, admin only)
 router.post('/', authMiddleware, upload.single('image'), addAnnouncement);

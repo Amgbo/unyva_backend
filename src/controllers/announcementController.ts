@@ -30,7 +30,7 @@ export const getAnnouncements = async (req: Request, res: Response): Promise<voi
     console.log('📢 Fetching announcements...');
 
     const result = await pool.query(
-      'SELECT id, title, content, created_by, created_at FROM announcements ORDER BY created_at DESC'
+      'SELECT id, title, content, created_by, created_at, image_url FROM announcements ORDER BY created_at DESC'
     );
 
     console.log('✅ Announcements fetched successfully');
@@ -42,6 +42,38 @@ export const getAnnouncements = async (req: Request, res: Response): Promise<voi
     console.error('❌ Get Announcements Error:', err);
     res.status(500).json({
       error: 'Failed to fetch announcements',
+      message: err.message
+    });
+  }
+};
+
+// GET /api/announcements/:id - Fetch single announcement by ID
+export const getAnnouncementById = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    console.log('📢 Fetching announcement by ID:', id);
+
+    const result = await pool.query(
+      'SELECT id, title, content, created_by, created_at, image_url FROM announcements WHERE id = $1',
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      res.status(404).json({
+        error: 'Announcement not found'
+      });
+      return;
+    }
+
+    console.log('✅ Announcement fetched successfully');
+    res.status(200).json({
+      success: true,
+      announcement: result.rows[0]
+    });
+  } catch (err: any) {
+    console.error('❌ Get Announcement By ID Error:', err);
+    res.status(500).json({
+      error: 'Failed to fetch announcement',
       message: err.message
     });
   }
