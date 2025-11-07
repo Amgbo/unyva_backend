@@ -81,7 +81,7 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 app.use('/api/payments', paymentRoutes);
 
 // Routes
-app.use("/products", productRoutes);
+app.use("/api/products", productRoutes);
 app.use("/api/images", imageRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/university', universityHallRoutes);

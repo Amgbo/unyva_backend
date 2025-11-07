@@ -44,10 +44,15 @@ export const initializePayment = async (req: Request, res: Response): Promise<vo
 
 export const verifyPayment = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { reference } = req.query;
+    const { reference, student_id } = req.body;
 
     if (!reference || typeof reference !== 'string') {
       res.status(400).json({ error: 'Payment reference is required' });
+      return;
+    }
+
+    if (!student_id) {
+      res.status(400).json({ error: 'Student ID is required' });
       return;
     }
 
@@ -62,21 +67,34 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
     const { data } = response.data;
 
     if (data.status === 'success') {
-      // Update student payment status in database using email from Paystack response
-      const email = data.data.customer.email;
-      const updateQuery = `
-        UPDATE students
-        SET paid = true, payment_date = NOW()
-        WHERE email = $1
-        RETURNING *;
-      `;
+      // Check if already paid to prevent duplicate updates
+      const checkQuery = `SELECT paid FROM students WHERE student_id = $1;`;
+      const checkResult = await pool.query(checkQuery, [student_id]);
 
-      const result = await pool.query(updateQuery, [email]);
-
-      if (result.rows.length === 0) {
+      if (checkResult.rows.length === 0) {
         res.status(404).json({ error: 'Student not found' });
         return;
       }
+
+      if (checkResult.rows[0].paid) {
+        res.json({
+          success: true,
+          message: 'Payment already verified',
+          student_id,
+          transaction: data,
+        });
+        return;
+      }
+
+      // Update student payment status in database using student_id
+      const updateQuery = `
+        UPDATE students
+        SET paid = true, payment_date = NOW()
+        WHERE student_id = $1
+        RETURNING *;
+      `;
+
+      const result = await pool.query(updateQuery, [student_id]);
 
       res.json({
         success: true,
@@ -145,19 +163,46 @@ export const handleWebhook = async (req: Request, res: Response): Promise<void> 
     // Handle charge.success event
     if (event.event === 'charge.success') {
       const email = event.data.customer.email;
+      const studentId = event.data.metadata?.student_id;
 
-      // Update student payment status using email
-      const updateQuery = `
-        UPDATE students
-        SET paid = true, payment_date = NOW()
-        WHERE email = $1
-        RETURNING *;
-      `;
+      let checkQuery, updateQuery, params;
+      if (studentId) {
+        checkQuery = `SELECT paid FROM students WHERE student_id = $1;`;
+        updateQuery = `
+          UPDATE students
+          SET paid = true, payment_date = NOW()
+          WHERE student_id = $1
+          RETURNING *;
+        `;
+        params = [studentId];
+      } else {
+        checkQuery = `SELECT paid FROM students WHERE email = $1;`;
+        updateQuery = `
+          UPDATE students
+          SET paid = true, payment_date = NOW()
+          WHERE email = $1
+          RETURNING *;
+        `;
+        params = [email];
+      }
 
-      const result = await pool.query(updateQuery, [email]);
+      // Check if already paid to prevent duplicate updates
+      const checkResult = await pool.query(checkQuery, params);
+
+      if (checkResult.rows.length === 0) {
+        console.log(`Student not found for ${studentId ? 'student_id' : 'email'} ${params[0]}`);
+        return;
+      }
+
+      if (checkResult.rows[0].paid) {
+        console.log(`Payment already confirmed for ${studentId ? 'student_id' : 'email'} ${params[0]}`);
+        return;
+      }
+
+      const result = await pool.query(updateQuery, params);
 
       if (result.rows.length > 0) {
-        console.log(`Payment confirmed for student with email ${email}`);
+        console.log(`Payment confirmed via webhook for ${studentId ? 'student_id' : 'email'} ${params[0]}`);
       }
     }
 
