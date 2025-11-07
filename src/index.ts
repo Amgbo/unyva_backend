@@ -22,6 +22,7 @@ import deliveryRoutes from './routes/deliveryRoutes.js';
 import orderRoutes from './routes/orderRoutes.js';
 import reviewRoutes from './routes/reviewRoutes.js';
 import { announcementRouter as announcementRoutes } from './routes/announcementRoutes.js';
+import paymentRoutes from './routes/paymentRoutes.js';
 
 // Initialize app
 const app = express();
@@ -75,6 +76,9 @@ app.use(express.urlencoded({ extended: true }));
 
 // Serve uploaded files statically
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+
+// Payment routes (must be before json middleware for webhook raw body)
+app.use('/api/payments', paymentRoutes);
 
 // Routes
 app.use("/products", productRoutes);

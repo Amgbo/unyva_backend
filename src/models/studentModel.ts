@@ -15,6 +15,8 @@ export interface StudentStep1 {
   program: string;
   graduation_year?: number;
   delivery_code?: string;
+  has_paid?: boolean;
+  payment_date?: string;
 }
 
 // Save Step 1 registration data
