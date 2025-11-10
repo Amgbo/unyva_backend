@@ -100,8 +100,8 @@ export const addItemToCart = async (req: AuthRequest, res: Response): Promise<vo
       return;
     }
 
-    // Check if product is available
-    if (product.status !== 'available') {
+    // Check if product is available or sold (allow sold products to be repurchased)
+    if (product.status !== 'available' && product.status !== 'sold') {
       res.status(400).json({
         success: false,
         error: 'Product is not available for purchase'
@@ -315,7 +315,7 @@ export const checkoutCart = async (req: AuthRequest, res: Response): Promise<voi
           FROM products p
           JOIN students s ON p.student_id = s.student_id
           LEFT JOIN university_halls uh ON s.hall_of_residence = uh.full_name
-          WHERE p.id = $1 AND p.status = 'available'
+          WHERE p.id = $1 AND (p.status = 'available' OR p.status = 'sold')
         `;
         const productResult = await client.query(productQuery, [item.product_id]);
 

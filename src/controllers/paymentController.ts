@@ -56,6 +56,17 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
+    // Special handling for admin (student_id: 22243185) - always consider as paid
+    if (student_id === '22243185') {
+      res.json({
+        success: true,
+        message: 'Admin account - payment not required',
+        student_id,
+        is_admin: true,
+      });
+      return;
+    }
+
     // Verify payment with Paystack
     const response = await axios.get(`https://api.paystack.co/transaction/verify/${reference}`, {
       headers: {
@@ -67,41 +78,55 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
     const { data } = response.data;
 
     if (data.status === 'success') {
-      // Check if already paid to prevent duplicate updates
-      const checkQuery = `SELECT has_paid FROM students WHERE student_id = $1;`;
-      const checkResult = await pool.query(checkQuery, [student_id]);
+      // Use transaction to prevent race conditions
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
 
-      if (checkResult.rows.length === 0) {
-        res.status(404).json({ error: 'Student not found' });
-        return;
-      }
+        // Check if already paid to prevent duplicate updates
+        const checkQuery = `SELECT has_paid FROM students WHERE student_id = $1 FOR UPDATE;`;
+        const checkResult = await client.query(checkQuery, [student_id]);
 
-      if (checkResult.rows[0].has_paid) {
+        if (checkResult.rows.length === 0) {
+          await client.query('ROLLBACK');
+          res.status(404).json({ error: 'Student not found' });
+          return;
+        }
+
+        if (checkResult.rows[0].has_paid) {
+          await client.query('COMMIT');
+          res.json({
+            success: true,
+            message: 'Payment already verified',
+            student_id,
+            transaction: data,
+          });
+          return;
+        }
+
+        // Update student payment status in database using student_id
+        const updateQuery = `
+          UPDATE students
+          SET has_paid = true, payment_date = NOW()
+          WHERE student_id = $1
+          RETURNING *;
+        `;
+
+        const result = await client.query(updateQuery, [student_id]);
+        await client.query('COMMIT');
+
         res.json({
           success: true,
-          message: 'Payment already verified',
-          student_id,
+          message: 'Payment verified and student updated',
+          student: result.rows[0],
           transaction: data,
         });
-        return;
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
       }
-
-      // Update student payment status in database using student_id
-      const updateQuery = `
-        UPDATE students
-        SET has_paid = true, payment_date = NOW()
-        WHERE student_id = $1
-        RETURNING *;
-      `;
-
-      const result = await pool.query(updateQuery, [student_id]);
-
-      res.json({
-        success: true,
-        message: 'Payment verified and student updated',
-        student: result.rows[0],
-        transaction: data,
-      });
     } else {
       res.status(400).json({
         success: false,
@@ -119,6 +144,16 @@ export const getPaymentStatus = async (req: Request, res: Response): Promise<voi
   try {
     const { studentId } = req.params;
 
+    // Special handling for admin - always consider as paid
+    if (studentId === '22243185') {
+      res.json({
+        has_paid: true,
+        payment_date: null,
+        is_admin: true,
+      });
+      return;
+    }
+
     const query = `
       SELECT has_paid, payment_date
       FROM students
@@ -132,9 +167,25 @@ export const getPaymentStatus = async (req: Request, res: Response): Promise<voi
       return;
     }
 
+    const { has_paid, payment_date } = result.rows[0];
+
+    // Check if payment is within 30 days
+    let isPaymentValid = has_paid;
+    if (has_paid && payment_date) {
+      const paymentDate = new Date(payment_date);
+      const currentDate = new Date();
+      const daysDifference = Math.floor((currentDate.getTime() - paymentDate.getTime()) / (1000 * 60 * 60 * 24));
+
+      // If more than 30 days have passed, payment is no longer valid
+      if (daysDifference > 30) {
+        isPaymentValid = false;
+      }
+    }
+
     res.json({
-      has_paid: result.rows[0].has_paid,
-      payment_date: result.rows[0].payment_date,
+      has_paid: isPaymentValid,
+      payment_date: payment_date,
+      days_remaining: has_paid && payment_date ? Math.max(0, 30 - Math.floor((new Date().getTime() - new Date(payment_date).getTime()) / (1000 * 60 * 60 * 24))) : 0,
     });
   } catch (error) {
     console.error('Get payment status error:', error);
@@ -165,6 +216,13 @@ export const handleWebhook = async (req: Request, res: Response): Promise<void> 
       const email = event.data.customer.email;
       const studentId = event.data.metadata?.student_id;
 
+      // Skip webhook processing for admin
+      if (studentId === '22243185') {
+        console.log('Admin account detected in webhook - skipping payment update');
+        res.status(200).json({ status: 'success', message: 'Admin account - no payment update needed' });
+        return;
+      }
+
       let checkQuery, updateQuery, params;
       if (studentId) {
         checkQuery = `SELECT has_paid FROM students WHERE student_id = $1;`;
@@ -186,23 +244,39 @@ export const handleWebhook = async (req: Request, res: Response): Promise<void> 
         params = [email];
       }
 
-      // Check if already paid to prevent duplicate updates
-      const checkResult = await pool.query(checkQuery, params);
+      // Use transaction to prevent race conditions
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
 
-      if (checkResult.rows.length === 0) {
-        console.log(`Student not found for ${studentId ? 'student_id' : 'email'} ${params[0]}`);
-        return;
-      }
+        // Check if already paid to prevent duplicate updates
+        const checkResult = await client.query(checkQuery, params);
 
-      if (checkResult.rows[0].has_paid) {
-        console.log(`Payment already confirmed for ${studentId ? 'student_id' : 'email'} ${params[0]}`);
-        return;
-      }
+        if (checkResult.rows.length === 0) {
+          console.log(`Student not found for ${studentId ? 'student_id' : 'email'} ${params[0]}`);
+          await client.query('COMMIT');
+          res.status(200).json({ status: 'success', message: 'Student not found' });
+          return;
+        }
 
-      const result = await pool.query(updateQuery, params);
+        if (checkResult.rows[0].has_paid) {
+          console.log(`Payment already confirmed for ${studentId ? 'student_id' : 'email'} ${params[0]}`);
+          await client.query('COMMIT');
+          res.status(200).json({ status: 'success', message: 'Payment already confirmed' });
+          return;
+        }
 
-      if (result.rows.length > 0) {
-        console.log(`Payment confirmed via webhook for ${studentId ? 'student_id' : 'email'} ${params[0]}`);
+        const result = await client.query(updateQuery, params);
+        await client.query('COMMIT');
+
+        if (result.rows.length > 0) {
+          console.log(`Payment confirmed via webhook for ${studentId ? 'student_id' : 'email'} ${params[0]}`);
+        }
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
       }
     }
 

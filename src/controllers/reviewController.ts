@@ -5,10 +5,10 @@ import { pool } from '../db.js';
 import { ReviewModel, ProductReview, CreateReviewData } from '../models/reviewModel.js';
 
 // GET: Get all reviews for a product (with nested replies)
-export const getProductReviews = async (req: Request<{ productId: string }>, res: Response): Promise<void> => {
+export const getProductReviews = async (req: Request<{ productId?: string; id?: string }>, res: Response): Promise<void> => {
   try {
-    const { productId } = req.params;
-    const productIdNum = parseInt(productId, 10);
+    const productId = req.params.productId || req.params.id;
+    const productIdNum = parseInt(productId!, 10);
 
     if (isNaN(productIdNum)) {
       res.status(400).json({
