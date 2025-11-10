@@ -68,7 +68,7 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
 
     if (data.status === 'success') {
       // Check if already paid to prevent duplicate updates
-      const checkQuery = `SELECT paid FROM students WHERE student_id = $1;`;
+      const checkQuery = `SELECT has_paid FROM students WHERE student_id = $1;`;
       const checkResult = await pool.query(checkQuery, [student_id]);
 
       if (checkResult.rows.length === 0) {
@@ -76,7 +76,7 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
         return;
       }
 
-      if (checkResult.rows[0].paid) {
+      if (checkResult.rows[0].has_paid) {
         res.json({
           success: true,
           message: 'Payment already verified',
@@ -89,7 +89,7 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
       // Update student payment status in database using student_id
       const updateQuery = `
         UPDATE students
-        SET paid = true, payment_date = NOW()
+        SET has_paid = true, payment_date = NOW()
         WHERE student_id = $1
         RETURNING *;
       `;
@@ -120,7 +120,7 @@ export const getPaymentStatus = async (req: Request, res: Response): Promise<voi
     const { studentId } = req.params;
 
     const query = `
-      SELECT paid, payment_date
+      SELECT has_paid, payment_date
       FROM students
       WHERE student_id = $1;
     `;
@@ -133,7 +133,7 @@ export const getPaymentStatus = async (req: Request, res: Response): Promise<voi
     }
 
     res.json({
-      has_paid: result.rows[0].paid,
+      has_paid: result.rows[0].has_paid,
       payment_date: result.rows[0].payment_date,
     });
   } catch (error) {
@@ -167,19 +167,19 @@ export const handleWebhook = async (req: Request, res: Response): Promise<void> 
 
       let checkQuery, updateQuery, params;
       if (studentId) {
-        checkQuery = `SELECT paid FROM students WHERE student_id = $1;`;
+        checkQuery = `SELECT has_paid FROM students WHERE student_id = $1;`;
         updateQuery = `
           UPDATE students
-          SET paid = true, payment_date = NOW()
+          SET has_paid = true, payment_date = NOW()
           WHERE student_id = $1
           RETURNING *;
         `;
         params = [studentId];
       } else {
-        checkQuery = `SELECT paid FROM students WHERE email = $1;`;
+        checkQuery = `SELECT has_paid FROM students WHERE email = $1;`;
         updateQuery = `
           UPDATE students
-          SET paid = true, payment_date = NOW()
+          SET has_paid = true, payment_date = NOW()
           WHERE email = $1
           RETURNING *;
         `;
@@ -194,7 +194,7 @@ export const handleWebhook = async (req: Request, res: Response): Promise<void> 
         return;
       }
 
-      if (checkResult.rows[0].paid) {
+      if (checkResult.rows[0].has_paid) {
         console.log(`Payment already confirmed for ${studentId ? 'student_id' : 'email'} ${params[0]}`);
         return;
       }

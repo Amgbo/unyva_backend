@@ -45,9 +45,15 @@ router.get('/', async (req: Request, res: Response) => {
 
     // Combine and deduplicate products
     const allProducts = [...recentProducts, ...featuredProducts];
-    const uniqueProducts = allProducts.filter((product, index, self) =>
+    let uniqueProducts = allProducts.filter((product, index, self) =>
       index === self.findIndex(p => p.id === product.id)
     );
+
+    // Fallback to all available products if no recent/featured products
+    if (uniqueProducts.length === 0) {
+      const allAvailableProducts = await getAllProducts();
+      uniqueProducts = allAvailableProducts.slice(0, limit);
+    }
 
     // Fetch featured services
     const featuredServices = await getFeaturedServices(10);
