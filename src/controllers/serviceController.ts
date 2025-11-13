@@ -670,7 +670,7 @@ export const createReviewController = async (req: AuthRequest, res: Response): P
       return;
     }
 
-    let { service_id, booking_id, rating, title, comment } = req.body;
+  let { service_id, booking_id, rating, title, comment, parent_id } = req.body;
 
     // If service_id not in body, check params (for /:id/reviews route)
     if (!service_id && req.params.id) {
@@ -722,15 +722,46 @@ export const createReviewController = async (req: AuthRequest, res: Response): P
     // TODO: Re-enable booking validation once frontend sends valid booking_id values
     console.log('🔍 Booking validation disabled - review will be created without booking link');
 
-    const reviewData: Omit<ServiceReview, 'id' | 'created_at'> = {
+    // If this is a reply, validate parent review and depth
+    if (parent_id) {
+      const client = await pool.connect();
+      try {
+        const parentQuery = `
+          SELECT id, service_id, depth FROM service_reviews
+          WHERE id = $1
+        `;
+        const parentResult = await client.query(parentQuery, [parent_id]);
+
+        if (parentResult.rows.length === 0) {
+          res.status(404).json({ success: false, error: 'Parent review not found' });
+          return;
+        }
+
+        if (parentResult.rows[0].service_id !== serviceIdNum) {
+          res.status(400).json({ success: false, error: 'Parent review does not belong to this service' });
+          return;
+        }
+
+        const parentDepth = parentResult.rows[0].depth || 0;
+        if (parentDepth >= 2) {
+          res.status(400).json({ success: false, error: 'Cannot nest comments more than 3 levels deep. This comment is already at maximum nesting level.' });
+          return;
+        }
+      } finally {
+        client.release();
+      }
+    }
+
+    const reviewData: Omit<ServiceReview, 'id' | 'created_at'> & { parent_id?: number | null } = {
       service_id: serviceIdNum,
       booking_id: validatedBookingId,
       customer_id: studentId,
       provider_id: service.student_id,
-      rating: parseInt(rating),
-      title,
+      rating: parent_id ? 0 : parseInt(rating),
+      title: parent_id ? 'Reply' : title,
       comment,
-      is_verified: !!validatedBookingId // Verified if from a booking
+      is_verified: !!validatedBookingId, // Verified if from a booking
+      parent_id: parent_id || null
     };
 
     const review = await createReview(reviewData);

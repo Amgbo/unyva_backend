@@ -11,6 +11,8 @@ export interface ProductReview {
   created_at: Date;
   updated_at?: Date;
   parent_id?: number;
+  depth?: number;
+  thread_root_id?: number;
   replies?: ProductReview[];
 }
 
@@ -62,7 +64,7 @@ export class ReviewModel {
     }
   }
 
-  // Get all reviews for a product with nested replies
+  // Get all reviews for a product with nested replies (recursive)
   static async getProductReviews(
     productId: number,
     page: number = 1,
@@ -83,6 +85,8 @@ export class ReviewModel {
         pr.created_at,
         pr.updated_at,
         pr.parent_id,
+        pr.depth,
+        pr.thread_root_id,
         CONCAT(s.first_name, ' ', s.last_name) as student_name,
         s.profile_picture as student_avatar
       FROM product_reviews pr
@@ -92,8 +96,8 @@ export class ReviewModel {
       LIMIT $2 OFFSET $3
     `;
 
-    // Get all replies for the top-level reviews
-    const repliesQuery = `
+    // Get all nested replies for the product
+    const allRepliesQuery = `
       SELECT
         pr.id,
         pr.product_id,
@@ -105,12 +109,14 @@ export class ReviewModel {
         pr.created_at,
         pr.updated_at,
         pr.parent_id,
+        pr.depth,
+        pr.thread_root_id,
         CONCAT(s.first_name, ' ', s.last_name) as student_name,
         s.profile_picture as student_avatar
       FROM product_reviews pr
       JOIN students s ON pr.student_id = s.student_id
       WHERE pr.product_id = $1 AND pr.parent_id IS NOT NULL
-      ORDER BY pr.created_at ASC
+      ORDER BY pr.parent_id, pr.created_at ASC
     `;
 
     const countQuery = `
@@ -120,31 +126,42 @@ export class ReviewModel {
     `;
 
     try {
-      const [topLevelResult, repliesResult, countResult] = await Promise.all([
+      const [topLevelResult, allRepliesResult, countResult] = await Promise.all([
         pool.query(topLevelQuery, [productId, limit, offset]),
-        pool.query(repliesQuery, [productId]),
+        pool.query(allRepliesQuery, [productId]),
         pool.query(countQuery, [productId])
       ]);
 
       const topLevelReviews = topLevelResult.rows;
-      const allReplies = repliesResult.rows;
+      const allReplies = allRepliesResult.rows;
       const total = parseInt(countResult.rows[0].total);
       const hasMore = total > page * limit;
 
-      // Build nested structure
-      const reviewsWithReplies = topLevelReviews.map(review => {
-        const replies = allReplies.filter(reply => reply.parent_id === review.id);
-        return {
-          ...review,
-          replies: replies.length > 0 ? replies : undefined
-        };
-      });
+      // Build nested structure recursively
+      const reviewsWithNestedReplies = topLevelReviews.map(review => ({
+        ...review,
+        replies: ReviewModel.buildNestedComments(review.id, allReplies)
+      }));
 
-      return { reviews: reviewsWithReplies, total, hasMore };
+      return { reviews: reviewsWithNestedReplies, total, hasMore };
     } catch (error) {
       console.error('Error fetching product reviews:', error);
       throw error;
     }
+  }
+
+  // Helper function to recursively build nested comment structure
+  private static buildNestedComments(parentId: number, allComments: ReviewWithStudent[]): ReviewWithStudent[] | undefined {
+    const children = allComments.filter(c => c.parent_id === parentId);
+    
+    if (children.length === 0) {
+      return undefined;
+    }
+
+    return children.map(child => ({
+      ...child,
+      replies: ReviewModel.buildNestedComments(child.id, allComments)
+    }));
   }
 
   // Create a new review
@@ -240,7 +257,7 @@ export class ReviewModel {
     const reviewCheckQuery = `
       SELECT id
       FROM product_reviews
-      WHERE product_id = $1 AND student_id = $2
+      WHERE product_id = $1 AND student_id = $2 AND parent_id IS NULL
     `;
 
     try {
@@ -265,6 +282,25 @@ export class ReviewModel {
       return true; // Can review
     } catch (error) {
       console.error('Error checking if user can review product:', error);
+      return false;
+    }
+  }
+
+  // Check if a comment can have replies (depth < 2, meaning max 3 levels)
+  static async canReplyToComment(commentId: number): Promise<boolean> {
+    const query = `
+      SELECT depth FROM product_reviews WHERE id = $1
+    `;
+
+    try {
+      const result = await pool.query(query, [commentId]);
+      if (result.rows.length === 0) {
+        return false; // Comment doesn't exist
+      }
+      const depth = result.rows[0].depth || 0;
+      return depth < 2; // Can reply if depth is 0 or 1 (allows max 3 levels)
+    } catch (error) {
+      console.error('Error checking reply eligibility:', error);
       return false;
     }
   }

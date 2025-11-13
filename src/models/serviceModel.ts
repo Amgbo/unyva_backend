@@ -289,33 +289,82 @@ export const getServiceReviews = async (
   try {
     const offset = (page - 1) * limit;
 
-    const reviewsQuery = `
+    // Top-level reviews (parent_id IS NULL) with pagination
+    const topLevelQuery = `
       SELECT
-        sr.*,
-        s.first_name || ' ' || s.last_name as customer_name
+        sr.id,
+        sr.service_id,
+        sr.booking_id,
+        sr.customer_id,
+        sr.provider_id,
+        sr.rating,
+        sr.title,
+        sr.comment,
+        sr.is_verified,
+        sr.created_at,
+        sr.updated_at,
+        sr.parent_id,
+        sr.depth,
+        sr.thread_root_id,
+        s.first_name || ' ' || s.last_name as customer_name,
+        s.profile_picture as customer_avatar
       FROM service_reviews sr
       LEFT JOIN students s ON sr.customer_id = s.student_id
-      WHERE sr.service_id = $1
+      WHERE sr.service_id = $1 AND sr.parent_id IS NULL
       ORDER BY sr.created_at DESC
       LIMIT $2 OFFSET $3
+    `;
+
+    // All replies for this service (parent_id IS NOT NULL)
+    const allRepliesQuery = `
+      SELECT
+        sr.id,
+        sr.service_id,
+        sr.booking_id,
+        sr.customer_id,
+        sr.provider_id,
+        sr.rating,
+        sr.title,
+        sr.comment,
+        sr.is_verified,
+        sr.created_at,
+        sr.updated_at,
+        sr.parent_id,
+        sr.depth,
+        sr.thread_root_id,
+        s.first_name || ' ' || s.last_name as customer_name,
+        s.profile_picture as customer_avatar
+      FROM service_reviews sr
+      LEFT JOIN students s ON sr.customer_id = s.student_id
+      WHERE sr.service_id = $1 AND sr.parent_id IS NOT NULL
+      ORDER BY sr.parent_id, sr.created_at ASC
     `;
 
     const countQuery = `
       SELECT COUNT(*) as total
       FROM service_reviews
-      WHERE service_id = $1
+      WHERE service_id = $1 AND parent_id IS NULL
     `;
 
-    const [reviewsResult, countResult] = await Promise.all([
-      pool.query(reviewsQuery, [serviceId, limit, offset]),
+    const [topLevelResult, allRepliesResult, countResult] = await Promise.all([
+      pool.query(topLevelQuery, [serviceId, limit, offset]),
+      pool.query(allRepliesQuery, [serviceId]),
       pool.query(countQuery, [serviceId])
     ]);
 
+    const topLevelReviews = topLevelResult.rows;
+    const allReplies = allRepliesResult.rows;
     const total = parseInt(countResult.rows[0].total, 10) || 0;
-    const hasMore = offset + limit < total;
+    const hasMore = total > page * limit;
+
+    // Build nested structure
+    const reviewsWithNestedReplies = topLevelReviews.map((review: any) => ({
+      ...review,
+      replies: buildNestedComments(review.id, allReplies)
+    }));
 
     return {
-      reviews: reviewsResult.rows,
+      reviews: reviewsWithNestedReplies,
       total,
       hasMore
     };
@@ -323,6 +372,16 @@ export const getServiceReviews = async (
     console.error('Database error in getServiceReviews:', error);
     throw error;
   }
+};
+
+// Helper to recursively build nested replies for service reviews
+const buildNestedComments = (parentId: number, allComments: any[]): any[] | undefined => {
+  const children = allComments.filter(c => c.parent_id === parentId);
+  if (!children || children.length === 0) return undefined;
+  return children.map(child => ({
+    ...child,
+    replies: buildNestedComments(child.id, allComments)
+  }));
 };
 
 // -------------------------
@@ -886,12 +945,13 @@ export const markNotificationAsRead = async (notificationId: number): Promise<Se
 
 // -------------------------
 // Reviews
-export const createReview = async (reviewData: Omit<ServiceReview, 'id' | 'created_at'>): Promise<ServiceReview> => {
+export const createReview = async (reviewData: Omit<ServiceReview, 'id' | 'created_at'> & { parent_id?: number | null }): Promise<ServiceReview> => {
   try {
+    // Allow replies by accepting parent_id. Replies should set rating = 0 by controller when appropriate.
     const query = `
       INSERT INTO service_reviews
-      (service_id, booking_id, customer_id, provider_id, rating, title, comment, is_verified)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      (service_id, booking_id, customer_id, provider_id, rating, title, comment, is_verified, parent_id)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *
     `;
     const values = [
@@ -902,7 +962,8 @@ export const createReview = async (reviewData: Omit<ServiceReview, 'id' | 'creat
       reviewData.rating,
       reviewData.title ?? null,
       reviewData.comment ?? null,
-      reviewData.is_verified ?? false
+      reviewData.is_verified ?? false,
+      reviewData.parent_id ?? null
     ];
     const result = await pool.query(query, values);
     return result.rows[0];

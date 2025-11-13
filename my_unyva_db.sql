@@ -768,3 +768,384 @@ CHECK (
   (has_paid = FALSE AND payment_date IS NULL) OR
   (has_paid = TRUE AND payment_date IS NOT NULL)
 );
+
+
+
+
+# 🗄️ Complete Database Migration - Nested Comments System
+
+**For:** my_unyva_db on Neon  
+**Date:** November 12, 2025  
+**Purpose:** Add nested comment support to product_reviews and service_reviews tables
+
+---
+
+
+-- ============================================
+-- NESTED COMMENTS MIGRATION
+-- For: product_reviews and service_reviews
+-- Database: my_unyva_db (Neon)
+-- ============================================
+
+-- ============================================
+-- PART 1: UPDATE product_reviews TABLE
+-- ============================================
+
+-- Step 1a: Add columns to product_reviews
+ALTER TABLE product_reviews 
+ADD COLUMN IF NOT EXISTS depth INTEGER DEFAULT 0,
+ADD COLUMN IF NOT EXISTS thread_root_id INTEGER DEFAULT NULL;
+
+-- Step 2a: Create indexes for product_reviews
+CREATE INDEX IF NOT EXISTS idx_product_reviews_depth 
+ON product_reviews(depth);
+
+CREATE INDEX IF NOT EXISTS idx_product_reviews_thread_root 
+ON product_reviews(thread_root_id);
+
+CREATE INDEX IF NOT EXISTS idx_product_reviews_parent_product 
+ON product_reviews(parent_id, product_id);
+
+-- Step 3a: Update depth values for product_reviews
+-- Top-level reviews (no parent)
+UPDATE product_reviews 
+SET depth = 0
+WHERE parent_id IS NULL;
+
+-- First-level replies (replies to reviews)
+UPDATE product_reviews pr1
+SET depth = 1
+WHERE parent_id IS NOT NULL 
+AND NOT EXISTS (
+  SELECT 1 FROM product_reviews pr2 
+  WHERE pr2.id = pr1.parent_id AND pr2.parent_id IS NOT NULL
+);
+
+-- Second-level replies (replies to replies)
+UPDATE product_reviews pr1
+SET depth = 2
+WHERE parent_id IS NOT NULL 
+AND EXISTS (
+  SELECT 1 FROM product_reviews pr2 
+  WHERE pr2.id = pr1.parent_id AND pr2.parent_id IS NOT NULL
+);
+
+-- Step 4a: Set thread_root_id for product_reviews
+-- For top-level reviews: thread_root_id = their own id
+UPDATE product_reviews 
+SET thread_root_id = id
+WHERE parent_id IS NULL AND thread_root_id IS NULL;
+
+-- For first-level replies: thread_root_id = parent_id
+UPDATE product_reviews pr1
+SET thread_root_id = pr1.parent_id
+WHERE pr1.parent_id IS NOT NULL 
+AND pr1.depth = 1
+AND pr1.thread_root_id IS NULL;
+
+-- For nested replies: find root through recursive search
+WITH RECURSIVE root_finder AS (
+  SELECT id, parent_id, parent_id as root_id
+  FROM product_reviews
+  WHERE parent_id IS NOT NULL AND depth = 2
+  
+  UNION ALL
+  
+  SELECT rf.id, pr.parent_id, 
+    CASE WHEN pr.parent_id IS NULL THEN pr.id ELSE rf.root_id END
+  FROM root_finder rf
+  JOIN product_reviews pr ON pr.id = rf.parent_id
+  WHERE pr.id IS NOT NULL
+)
+UPDATE product_reviews pr
+SET thread_root_id = (
+  SELECT DISTINCT root_id FROM root_finder WHERE root_finder.id = pr.id LIMIT 1
+)
+WHERE pr.thread_root_id IS NULL AND pr.parent_id IS NOT NULL;
+
+-- ============================================
+-- PART 2: UPDATE service_reviews TABLE
+-- ============================================
+
+-- Step 1b: Add columns to service_reviews
+ALTER TABLE service_reviews 
+ADD COLUMN IF NOT EXISTS depth INTEGER DEFAULT 0,
+ADD COLUMN IF NOT EXISTS thread_root_id INTEGER DEFAULT NULL;
+
+-- Step 2b: Create indexes for service_reviews
+CREATE INDEX IF NOT EXISTS idx_service_reviews_depth 
+ON service_reviews(depth);
+
+CREATE INDEX IF NOT EXISTS idx_service_reviews_thread_root 
+ON service_reviews(thread_root_id);
+
+CREATE INDEX IF NOT EXISTS idx_service_reviews_parent_service 
+ON service_reviews(parent_id, service_id);
+
+-- Step 3b: Update depth values for service_reviews
+-- Top-level reviews (no parent)
+UPDATE service_reviews 
+SET depth = 0
+WHERE parent_id IS NULL;
+
+-- First-level replies (replies to reviews)
+UPDATE service_reviews sr1
+SET depth = 1
+WHERE parent_id IS NOT NULL 
+AND NOT EXISTS (
+  SELECT 1 FROM service_reviews sr2 
+  WHERE sr2.id = sr1.parent_id AND sr2.parent_id IS NOT NULL
+);
+
+-- Second-level replies (replies to replies)
+UPDATE service_reviews sr1
+SET depth = 2
+WHERE parent_id IS NOT NULL 
+AND EXISTS (
+  SELECT 1 FROM service_reviews sr2 
+  WHERE sr2.id = sr1.parent_id AND sr2.parent_id IS NOT NULL
+);
+
+-- Step 4b: Set thread_root_id for service_reviews
+-- For top-level reviews: thread_root_id = their own id
+UPDATE service_reviews 
+SET thread_root_id = id
+WHERE parent_id IS NULL AND thread_root_id IS NULL;
+
+-- For first-level replies: thread_root_id = parent_id
+UPDATE service_reviews sr1
+SET thread_root_id = sr1.parent_id
+WHERE sr1.parent_id IS NOT NULL 
+AND sr1.depth = 1
+AND sr1.thread_root_id IS NULL;
+
+-- For nested replies: find root through recursive search
+WITH RECURSIVE root_finder AS (
+  SELECT id, parent_id, parent_id as root_id
+  FROM service_reviews
+  WHERE parent_id IS NOT NULL AND depth = 2
+  
+  UNION ALL
+  
+  SELECT rf.id, sr.parent_id, 
+    CASE WHEN sr.parent_id IS NULL THEN sr.id ELSE rf.root_id END
+  FROM root_finder rf
+  JOIN service_reviews sr ON sr.id = rf.parent_id
+  WHERE sr.id IS NOT NULL
+)
+UPDATE service_reviews sr
+SET thread_root_id = (
+  SELECT DISTINCT root_id FROM root_finder WHERE root_finder.id = sr.id LIMIT 1
+)
+WHERE sr.thread_root_id IS NULL AND sr.parent_id IS NOT NULL;
+
+-- ============================================
+-- PART 3: CREATE SHARED FUNCTIONS
+-- ============================================
+
+-- Function to get comment depth (used by triggers)
+CREATE OR REPLACE FUNCTION get_comment_depth(comment_id INTEGER, table_name TEXT)
+RETURNS INTEGER AS $$
+DECLARE
+  parent_id_val INTEGER;
+  parent_depth INTEGER;
+BEGIN
+  IF table_name = 'product_reviews' THEN
+    SELECT parent_id INTO parent_id_val FROM product_reviews WHERE id = comment_id;
+    IF parent_id_val IS NULL THEN
+      RETURN 0;
+    ELSE
+      SELECT depth INTO parent_depth FROM product_reviews WHERE id = parent_id_val;
+      RETURN COALESCE(parent_depth, 0) + 1;
+    END IF;
+  ELSIF table_name = 'service_reviews' THEN
+    SELECT parent_id INTO parent_id_val FROM service_reviews WHERE id = comment_id;
+    IF parent_id_val IS NULL THEN
+      RETURN 0;
+    ELSE
+      SELECT depth INTO parent_depth FROM service_reviews WHERE id = parent_id_val;
+      RETURN COALESCE(parent_depth, 0) + 1;
+    END IF;
+  END IF;
+  RETURN 0;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ============================================
+-- PART 4: CREATE TRIGGERS FOR product_reviews
+-- ============================================
+
+-- Function to validate and set depth on product_reviews insert
+CREATE OR REPLACE FUNCTION validate_and_set_comment_depth_products()
+RETURNS TRIGGER AS $$
+DECLARE
+  parent_depth INTEGER;
+  parent_root_id INTEGER;
+BEGIN
+  IF NEW.parent_id IS NOT NULL THEN
+    -- Get parent's depth
+    SELECT depth INTO parent_depth FROM product_reviews WHERE id = NEW.parent_id;
+    
+    -- Check max depth (3 levels: 0, 1, 2 where 2 is max)
+    IF COALESCE(parent_depth, 0) >= 2 THEN
+      RAISE EXCEPTION 'Cannot nest comments more than 3 levels deep';
+    END IF;
+    
+    -- Set new comment's depth
+    NEW.depth = COALESCE(parent_depth, 0) + 1;
+    
+    -- Set thread_root_id
+    SELECT thread_root_id INTO parent_root_id FROM product_reviews WHERE id = NEW.parent_id;
+    NEW.thread_root_id = COALESCE(parent_root_id, NEW.parent_id);
+  ELSE
+    -- Top-level comment
+    NEW.depth = 0;
+  END IF;
+  
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Function to set thread_root_id after insert for product_reviews
+CREATE OR REPLACE FUNCTION set_thread_root_for_toplevel_products()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.parent_id IS NULL THEN
+    UPDATE product_reviews SET thread_root_id = NEW.id WHERE id = NEW.id;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Drop existing product_reviews triggers
+DROP TRIGGER IF EXISTS trigger_validate_comment_depth_products ON product_reviews;
+DROP TRIGGER IF EXISTS trigger_set_thread_root_products ON product_reviews;
+
+-- Create triggers for product_reviews
+CREATE TRIGGER trigger_validate_comment_depth_products
+BEFORE INSERT ON product_reviews
+FOR EACH ROW
+EXECUTE FUNCTION validate_and_set_comment_depth_products();
+
+CREATE TRIGGER trigger_set_thread_root_products
+AFTER INSERT ON product_reviews
+FOR EACH ROW
+EXECUTE FUNCTION set_thread_root_for_toplevel_products();
+
+-- ============================================
+-- PART 5: CREATE TRIGGERS FOR service_reviews
+-- ============================================
+
+-- Function to validate and set depth on service_reviews insert
+CREATE OR REPLACE FUNCTION validate_and_set_comment_depth_services()
+RETURNS TRIGGER AS $$
+DECLARE
+  parent_depth INTEGER;
+  parent_root_id INTEGER;
+BEGIN
+  IF NEW.parent_id IS NOT NULL THEN
+    -- Get parent's depth
+    SELECT depth INTO parent_depth FROM service_reviews WHERE id = NEW.parent_id;
+    
+    -- Check max depth (3 levels: 0, 1, 2 where 2 is max)
+    IF COALESCE(parent_depth, 0) >= 2 THEN
+      RAISE EXCEPTION 'Cannot nest comments more than 3 levels deep';
+    END IF;
+    
+    -- Set new comment's depth
+    NEW.depth = COALESCE(parent_depth, 0) + 1;
+    
+    -- Set thread_root_id
+    SELECT thread_root_id INTO parent_root_id FROM service_reviews WHERE id = NEW.parent_id;
+    NEW.thread_root_id = COALESCE(parent_root_id, NEW.parent_id);
+  ELSE
+    -- Top-level comment
+    NEW.depth = 0;
+  END IF;
+  
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Function to set thread_root_id after insert for service_reviews
+CREATE OR REPLACE FUNCTION set_thread_root_for_toplevel_services()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.parent_id IS NULL THEN
+    UPDATE service_reviews SET thread_root_id = NEW.id WHERE id = NEW.id;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Drop existing service_reviews triggers
+DROP TRIGGER IF EXISTS trigger_validate_comment_depth_services ON service_reviews;
+DROP TRIGGER IF EXISTS trigger_set_thread_root_services ON service_reviews;
+
+-- Create triggers for service_reviews
+CREATE TRIGGER trigger_validate_comment_depth_services
+BEFORE INSERT ON service_reviews
+FOR EACH ROW
+EXECUTE FUNCTION validate_and_set_comment_depth_services();
+
+CREATE TRIGGER trigger_set_thread_root_services
+AFTER INSERT ON service_reviews
+FOR EACH ROW
+EXECUTE FUNCTION set_thread_root_for_toplevel_services();
+
+-- ============================================
+-- PART 6: ADD DOCUMENTATION
+-- ============================================
+
+COMMENT ON COLUMN product_reviews.depth IS 'Nesting level: 0=top-level review, 1-2=nested comments. Max depth is 2 (3 levels total).';
+COMMENT ON COLUMN product_reviews.thread_root_id IS 'ID of the root review in this thread. Used for grouping related comments.';
+
+COMMENT ON COLUMN service_reviews.depth IS 'Nesting level: 0=top-level review, 1-2=nested comments. Max depth is 2 (3 levels total).';
+COMMENT ON COLUMN service_reviews.thread_root_id IS 'ID of the root review in this thread. Used for grouping related comments.';
+
+-- ============================================
+-- MIGRATION COMPLETE
+-- ============================================
+
+
+
+---
+
+
+
+-- Check 1: Verify product_reviews columns
+SELECT column_name FROM information_schema.columns 
+WHERE table_name = 'product_reviews' 
+AND column_name IN ('depth', 'thread_root_id');
+-- Should return 2 rows
+
+-- Check 2: Verify service_reviews columns
+SELECT column_name FROM information_schema.columns 
+WHERE table_name = 'service_reviews' 
+AND column_name IN ('depth', 'thread_root_id');
+-- Should return 2 rows
+
+-- Check 3: Verify indexes
+SELECT indexname FROM pg_indexes 
+WHERE tablename IN ('product_reviews', 'service_reviews')
+AND indexname LIKE 'idx_%';
+-- Should return 6 rows
+
+-- Check 4: Verify triggers
+SELECT trigger_name FROM information_schema.triggers 
+WHERE event_object_table IN ('product_reviews', 'service_reviews');
+-- Should return 4 rows
+
+-- Check 5: View data with depth
+SELECT id, parent_id, depth, thread_root_id 
+FROM product_reviews 
+ORDER BY id DESC LIMIT 10;
+-- Should show depth values (0, 1, or 2)
+
+SELECT id, parent_id, depth, thread_root_id 
+FROM service_reviews 
+ORDER BY id DESC LIMIT 10;
+-- Should show depth values (0, 1, or 2)
+```
+
+---

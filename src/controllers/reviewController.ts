@@ -89,7 +89,7 @@ export const createReview = async (req: AuthRequest, res: Response): Promise<voi
       const client = await pool.connect();
       try {
         const parentQuery = `
-          SELECT id, product_id FROM product_reviews
+          SELECT id, product_id, depth FROM product_reviews
           WHERE id = $1
         `;
         const parentResult = await client.query(parentQuery, [parent_id]);
@@ -106,6 +106,16 @@ export const createReview = async (req: AuthRequest, res: Response): Promise<voi
           res.status(400).json({
             success: false,
             error: 'Parent review does not belong to this product'
+          });
+          return;
+        }
+
+        // Check max depth (3 levels: depth 0, 1, 2)
+        const parentDepth = parentResult.rows[0].depth || 0;
+        if (parentDepth >= 2) {
+          res.status(400).json({
+            success: false,
+            error: 'Cannot nest comments more than 3 levels deep. This comment is already at maximum nesting level.'
           });
           return;
         }
