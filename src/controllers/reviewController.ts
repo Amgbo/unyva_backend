@@ -87,11 +87,21 @@ export const createReview = async (req: AuthRequest, res: Response): Promise<voi
       // Reply: check if user can reply to this comment
       const canReply = await ReviewModel.canReplyToComment(parent_id);
       if (!canReply) {
-        res.status(403).json({
-          success: false,
-          error: 'You cannot reply to this comment'
-        });
-        return;
+        // Additional check: allow product owners to reply to reviews on their products
+        const productOwnerQuery = await pool.query(
+          'SELECT student_id FROM products WHERE id = $1',
+          [product_id]
+        );
+        const isProductOwner = productOwnerQuery.rows.length > 0 &&
+                              productOwnerQuery.rows[0].student_id === studentId;
+
+        if (!isProductOwner) {
+          res.status(403).json({
+            success: false,
+            error: 'You cannot reply to this comment'
+          });
+          return;
+        }
       }
     }
 
@@ -140,7 +150,8 @@ export const createReview = async (req: AuthRequest, res: Response): Promise<voi
       student_id: studentId,
       rating: parent_id ? 0 : rating,
       comment,
-      title: parent_id ? 'Reply' : 'Review'
+      title: parent_id ? 'Reply' : 'Review',
+      parent_id: parent_id || null
     };
 
     const review = await ReviewModel.createReview(reviewData);

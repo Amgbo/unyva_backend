@@ -22,6 +22,7 @@ import {
   createReview,
   deleteServiceReview,
   canUserReviewService,
+  canUserReplyToServiceComment,
   getUserReviewForService,
   updateProviderRating,
   getFeaturedServices,
@@ -32,6 +33,7 @@ import {
   ServiceBooking,
   ServiceNotification
 } from '../models/serviceModel.js';
+import { ReviewModel } from '../models/reviewModel.js';
 
 // GET: Single service by ID
 export const getService = async (req: Request<{ id: string }>, res: Response): Promise<void> => {
@@ -658,7 +660,7 @@ export const markNotificationReadController = async (req: Request, res: Response
   }
 };
 
-// POST: Create service review
+// POST: Create service review (enhanced with nested comments)
 export const createReviewController = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const studentId = req.user?.student_id;
@@ -670,7 +672,7 @@ export const createReviewController = async (req: AuthRequest, res: Response): P
       return;
     }
 
-  let { service_id, booking_id, rating, title, comment, parent_id } = req.body;
+    let { service_id, booking_id, rating, title, comment, parent_id } = req.body;
 
     // If service_id not in body, check params (for /:id/reviews route)
     if (!service_id && req.params.id) {
@@ -717,41 +719,27 @@ export const createReviewController = async (req: AuthRequest, res: Response): P
       return;
     }
 
+    // If this is a reply, validate permissions
+    if (parent_id) {
+      const canReply = await canUserReplyToServiceComment(studentId, parent_id);
+      if (!canReply) {
+        // Additional check: allow service providers to reply to reviews on their services
+        const isServiceProvider = service.student_id === studentId;
+        if (!isServiceProvider) {
+          res.status(403).json({
+            success: false,
+            error: 'You cannot reply to this comment'
+          });
+          return;
+        }
+      }
+    }
+
     // Prepare validated booking_id for review data
     // Temporarily disable booking validation to prevent database errors
     let validatedBookingId: number | undefined = undefined;
     // TODO: Re-enable booking validation once frontend sends valid booking_id values
     console.log('🔍 Booking validation disabled - review will be created without booking link');
-
-    // If this is a reply, validate parent review and depth
-    if (parent_id) {
-      const client = await pool.connect();
-      try {
-        const parentQuery = `
-          SELECT id, service_id, depth FROM service_reviews
-          WHERE id = $1
-        `;
-        const parentResult = await client.query(parentQuery, [parent_id]);
-
-        if (parentResult.rows.length === 0) {
-          res.status(404).json({ success: false, error: 'Parent review not found' });
-          return;
-        }
-
-        if (parentResult.rows[0].service_id !== serviceIdNum) {
-          res.status(400).json({ success: false, error: 'Parent review does not belong to this service' });
-          return;
-        }
-
-        const parentDepth = parentResult.rows[0].depth || 0;
-        if (parentDepth >= 2) {
-          res.status(400).json({ success: false, error: 'Cannot nest comments more than 3 levels deep. This comment is already at maximum nesting level.' });
-          return;
-        }
-      } finally {
-        client.release();
-      }
-    }
 
     const reviewData: Omit<ServiceReview, 'id' | 'created_at'> & { parent_id?: number | null } = {
       service_id: serviceIdNum,
@@ -767,9 +755,6 @@ export const createReviewController = async (req: AuthRequest, res: Response): P
 
     const review = await createReview(reviewData);
 
-    // Update provider rating after creating review
-    await updateProviderRating(review.provider_id);
-
     res.status(201).json({
       success: true,
       data: review,
@@ -784,7 +769,7 @@ export const createReviewController = async (req: AuthRequest, res: Response): P
   }
 };
 
-// DELETE: Delete service review
+// DELETE: Delete service review (enhanced with cascade deletion)
 export const deleteServiceReviewController = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const studentId = req.user?.student_id;
@@ -807,61 +792,21 @@ export const deleteServiceReviewController = async (req: AuthRequest, res: Respo
       return;
     }
 
-    // Check if the review exists and belongs to the authenticated user
-    const client = await pool.connect();
-    try {
-      const ownershipQuery = `
-        SELECT id, provider_id FROM service_reviews
-        WHERE id = $1
-      `;
-      const ownershipResult = await client.query(ownershipQuery, [reviewIdNum]);
+    // Delete the review (enhanced function handles ownership check and cascade)
+    const deletedCount = await deleteServiceReview(reviewIdNum, studentId);
 
-      if (ownershipResult.rows.length === 0) {
-        res.status(404).json({
-          success: false,
-          error: 'Review not found'
-        });
-        return;
-      }
-
-      const review = ownershipResult.rows[0];
-
-      // Check if user owns this review
-      const userReviewQuery = `
-        SELECT id FROM service_reviews
-        WHERE id = $1 AND customer_id = $2
-      `;
-      const userReviewResult = await client.query(userReviewQuery, [reviewIdNum, studentId]);
-
-      if (userReviewResult.rows.length === 0) {
-        res.status(403).json({
-          success: false,
-          error: 'You can only delete your own reviews'
-        });
-        return;
-      }
-
-      // Delete the review
-      const deleted = await deleteServiceReview(reviewIdNum);
-
-      if (!deleted) {
-        res.status(404).json({
-          success: false,
-          error: 'Review not found'
-        });
-        return;
-      }
-
-      // Update provider rating after deleting review
-      await updateProviderRating(review.provider_id);
-
-      res.status(200).json({
-        success: true,
-        message: 'Review deleted successfully'
+    if (deletedCount === 0) {
+      res.status(404).json({
+        success: false,
+        error: 'Review not found or you do not have permission to delete it'
       });
-    } finally {
-      client.release();
+      return;
     }
+
+    res.status(200).json({
+      success: true,
+      message: `Review and ${deletedCount - 1} nested replies deleted successfully`
+    });
   } catch (error) {
     console.error('❌ Error deleting review:', error);
     res.status(500).json({

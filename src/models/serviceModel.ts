@@ -280,7 +280,7 @@ export const getRelatedServices = async (
 };
 
 // -------------------------
-// Get service reviews with pagination
+// Get service reviews with pagination (enhanced nested comments)
 export const getServiceReviews = async (
   serviceId: number,
   page: number = 1,
@@ -357,7 +357,7 @@ export const getServiceReviews = async (
     const total = parseInt(countResult.rows[0].total, 10) || 0;
     const hasMore = total > page * limit;
 
-    // Build nested structure
+    // Build nested structure using enhanced recursive function
     const reviewsWithNestedReplies = topLevelReviews.map((review: any) => ({
       ...review,
       replies: buildNestedComments(review.id, allReplies)
@@ -944,14 +944,31 @@ export const markNotificationAsRead = async (notificationId: number): Promise<Se
 };
 
 // -------------------------
-// Reviews
+// Reviews (enhanced with depth and thread management)
 export const createReview = async (reviewData: Omit<ServiceReview, 'id' | 'created_at'> & { parent_id?: number | null }): Promise<ServiceReview> => {
   try {
+    // Validate max depth if this is a reply
+    if (reviewData.parent_id) {
+      const parentResult = await pool.query(
+        'SELECT depth FROM service_reviews WHERE id = $1',
+        [reviewData.parent_id]
+      );
+
+      if (parentResult.rows.length === 0) {
+        throw new Error('Parent review not found');
+      }
+
+      const parentDepth = parentResult.rows[0].depth;
+      if (parentDepth >= 2) { // Max depth is 2 (3 levels total)
+        throw new Error('Cannot nest comments more than 3 levels deep');
+      }
+    }
+
     // Allow replies by accepting parent_id. Replies should set rating = 0 by controller when appropriate.
     const query = `
       INSERT INTO service_reviews
-      (service_id, booking_id, customer_id, provider_id, rating, title, comment, is_verified, parent_id)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      (service_id, booking_id, customer_id, provider_id, rating, title, comment, is_verified, parent_id, depth, thread_root_id)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 0, NULL)
       RETURNING *
     `;
     const values = [
@@ -966,7 +983,15 @@ export const createReview = async (reviewData: Omit<ServiceReview, 'id' | 'creat
       reviewData.parent_id ?? null
     ];
     const result = await pool.query(query, values);
-    return result.rows[0];
+
+    const review = result.rows[0];
+
+    // Update provider rating after creating review (only for top-level reviews)
+    if (!reviewData.parent_id) {
+      await updateProviderRating(reviewData.provider_id);
+    }
+
+    return review;
   } catch (error) {
     console.error('Database error in createReview:', error);
     throw error;
@@ -1046,24 +1071,70 @@ export const getRecentServices = async (limit: number = 10): Promise<ServiceWith
 };
 
 // -------------------------
-// Review helper functions
-export const deleteServiceReview = async (reviewId: number): Promise<boolean> => {
+// Review helper functions (enhanced with cascade deletion)
+export const deleteServiceReview = async (reviewId: number, studentId: string): Promise<number> => {
   try {
-    const query = 'DELETE FROM service_reviews WHERE id = $1 RETURNING id';
-    const result = await pool.query(query, [reviewId]);
-    return result.rows.length > 0;
+    // Verify ownership
+    const ownerResult = await pool.query(
+      'SELECT customer_id, provider_id, parent_id FROM service_reviews WHERE id = $1',
+      [reviewId]
+    );
+
+    if (ownerResult.rows.length === 0) {
+      throw new Error('Review not found');
+    }
+
+    const { customer_id: owner, provider_id, parent_id } = ownerResult.rows[0];
+
+    if (owner !== studentId) {
+      throw new Error('You can only delete your own reviews');
+    }
+
+    // Count descendants (all comments that will be deleted)
+    const descendantCount = await countReviewDescendants(reviewId);
+
+    // Delete the review (CASCADE will handle all nested replies)
+    await pool.query('DELETE FROM service_reviews WHERE id = $1', [reviewId]);
+
+    // Update provider rating if this was a top-level review
+    if (!parent_id) {
+      await updateProviderRating(provider_id);
+    }
+
+    return descendantCount + 1; // Include the deleted review itself
   } catch (error) {
     console.error('Database error in deleteServiceReview:', error);
     throw error;
   }
 };
 
+// Helper function to count descendants recursively
+const countReviewDescendants = async (reviewId: number): Promise<number> => {
+  const query = `
+    WITH RECURSIVE descendants AS (
+      SELECT id FROM service_reviews WHERE parent_id = $1
+      UNION ALL
+      SELECT sr.id FROM service_reviews sr
+      INNER JOIN descendants d ON sr.parent_id = d.id
+    )
+    SELECT COUNT(*) as count FROM descendants
+  `;
+
+  try {
+    const result = await pool.query(query, [reviewId]);
+    return parseInt(result.rows[0].count);
+  } catch (error) {
+    console.error('Error counting descendants:', error);
+    return 0;
+  }
+};
+
 export const canUserReviewService = async (studentId: string, serviceId: number): Promise<boolean> => {
   try {
-    // Check if user has already reviewed this service
+    // Check if user has already reviewed this service (top-level reviews only)
     const existingReviewQuery = `
       SELECT id FROM service_reviews
-      WHERE service_id = $1 AND customer_id = $2
+      WHERE service_id = $1 AND customer_id = $2 AND parent_id IS NULL
     `;
     const existingResult = await pool.query(existingReviewQuery, [serviceId, studentId]);
 
@@ -1076,6 +1147,27 @@ export const canUserReviewService = async (studentId: string, serviceId: number)
     return true;
   } catch (error) {
     console.error('Database error in canUserReviewService:', error);
+    throw error;
+  }
+};
+
+// Check if user can reply to a service review/comment
+export const canUserReplyToServiceComment = async (studentId: string, commentId: number): Promise<boolean> => {
+  try {
+    // Check if the comment exists and get its depth
+    const commentResult = await pool.query(
+      'SELECT id, depth FROM service_reviews WHERE id = $1',
+      [commentId]
+    );
+
+    if (commentResult.rows.length === 0) {
+      return false; // Comment doesn't exist
+    }
+
+    const depth = commentResult.rows[0].depth || 0;
+    return depth < 2; // Can reply if not at max depth (max 3 levels: 0, 1, 2)
+  } catch (error) {
+    console.error('Error checking reply permission:', error);
     throw error;
   }
 };

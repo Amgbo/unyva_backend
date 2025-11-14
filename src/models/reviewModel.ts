@@ -169,6 +169,7 @@ export class ReviewModel {
     const { product_id, student_id, rating, title, comment, order_id, parent_id } = reviewData;
 
     // Check if user is trying to review their own product (only for top-level reviews)
+    // Allow product owners to reply to reviews on their products
     if (!parent_id) {
       const productOwner = await pool.query(
         'SELECT student_id FROM products WHERE id = $1',
