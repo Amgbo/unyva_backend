@@ -72,13 +72,24 @@ export const createReview = async (req: AuthRequest, res: Response): Promise<voi
       return;
     }
 
-    // Check if user can review this product (only for top-level reviews)
+    // Check permissions based on whether this is a review or reply
     if (!parent_id) {
+      // Top-level review: check if user can review this product
       const canReview = await ReviewModel.canUserReviewProduct(studentId, product_id);
       if (!canReview) {
         res.status(403).json({
           success: false,
           error: 'You are not authorized to review this product'
+        });
+        return;
+      }
+    } else {
+      // Reply: check if user can reply to this comment
+      const canReply = await ReviewModel.canReplyToComment(parent_id);
+      if (!canReply) {
+        res.status(403).json({
+          success: false,
+          error: 'You cannot reply to this comment'
         });
         return;
       }

@@ -707,8 +707,9 @@ export const createReviewController = async (req: AuthRequest, res: Response): P
       return;
     }
 
-    // Prevent reviewing own service
-    if (service.student_id === studentId) {
+    // Prevent reviewing own service for top-level reviews only
+    // Allow service providers to reply to reviews on their services
+    if (!parent_id && service.student_id === studentId) {
       res.status(403).json({
         success: false,
         error: 'You cannot review your own service'

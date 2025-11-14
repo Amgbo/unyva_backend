@@ -10,18 +10,24 @@ const PAYSTACK_WEBHOOK_SECRET = process.env.PAYSTACK_WEBHOOK_SECRET;
 
 export const initializePayment = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { email, amount } = req.body; // amount in pesewas
+    const { email, amount, student_id } = req.body; // amount in pesewas
 
     if (!email || !amount) {
+      console.warn('❌ Payment init failed: missing email or amount');
       res.status(400).json({ error: 'Email and amount are required' });
       return;
     }
+
+    console.log(`📍 Initializing payment - student: ${student_id}, email: ${email}, amount: ${amount} pesewas`);
 
     // Initialize payment with Paystack
     const response = await axios.post('https://api.paystack.co/transaction/initialize', {
       email,
       amount,
       callback_url: `${process.env.BASE_URL || 'http://localhost:5000'}/api/payments/verify`,
+      metadata: {
+        student_id,
+      },
     }, {
       headers: {
         Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
@@ -31,13 +37,15 @@ export const initializePayment = async (req: Request, res: Response): Promise<vo
 
     const { data } = response.data;
 
+    console.log(`✅ Payment init success - ref: ${data.reference}, student: ${student_id}`);
+
     res.json({
       authorization_url: data.authorization_url,
       access_code: data.access_code,
       reference: data.reference,
     });
   } catch (error) {
-    console.error('Payment initialization error:', error);
+    console.error(`❌ Payment initialization error for student ${req.body.student_id}:`, error);
     res.status(500).json({ error: 'Failed to initialize payment' });
   }
 };
@@ -47,17 +55,22 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
     const { reference, student_id } = req.body;
 
     if (!reference || typeof reference !== 'string') {
+      console.warn(`❌ Verify payment failed: missing reference for student ${student_id}`);
       res.status(400).json({ error: 'Payment reference is required' });
       return;
     }
 
     if (!student_id) {
+      console.warn('❌ Verify payment failed: missing student_id');
       res.status(400).json({ error: 'Student ID is required' });
       return;
     }
 
+    console.log(`📍 Verifying payment - student: ${student_id}, reference: ${reference}`);
+
     // Special handling for admin (student_id: 22243185) - always consider as paid
     if (student_id === '22243185') {
+      console.log(`✅ Admin account detected (${student_id}) - payment not required`);
       res.json({
         success: true,
         message: 'Admin account - payment not required',
@@ -78,6 +91,25 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
     const { data } = response.data;
 
     if (data.status === 'success') {
+      // Additional safety checks: ensure the transaction amount and metadata match expectations
+      const EXPECTED_AMOUNT = Number(process.env.PAYMENT_AMOUNT_PESAWAS || '500'); // default 500 pesewas = GH¢5
+
+      if (typeof data.amount === 'number') {
+        if (data.amount !== EXPECTED_AMOUNT) {
+          console.warn(`❌ Amount mismatch - student: ${student_id}, ref: ${reference}, expected: ${EXPECTED_AMOUNT}, got: ${data.amount}`);
+          res.status(400).json({ success: false, message: 'Payment amount does not match expected value', transaction: data });
+          return;
+        }
+      }
+
+      // Ensure metadata.student_id (if provided by Paystack) matches the supplied student_id
+      const metadataStudentId = data.metadata?.student_id || data.metadata?.studentId || null;
+      if (metadataStudentId && metadataStudentId !== student_id) {
+        console.warn(`❌ Metadata mismatch - student: ${student_id}, ref: ${reference}, metadata student_id: ${metadataStudentId}`);
+        res.status(400).json({ success: false, message: 'Payment metadata student_id mismatch', transaction: data });
+        return;
+      }
+
       // Use transaction to prevent race conditions
       const client = await pool.connect();
       try {
@@ -89,12 +121,14 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
 
         if (checkResult.rows.length === 0) {
           await client.query('ROLLBACK');
+          console.error(`❌ Student not found - student: ${student_id}, ref: ${reference}`);
           res.status(404).json({ error: 'Student not found' });
           return;
         }
 
         if (checkResult.rows[0].has_paid) {
           await client.query('COMMIT');
+          console.log(`⚠️  Payment already verified - student: ${student_id}, ref: ${reference}`);
           res.json({
             success: true,
             message: 'Payment already verified',
@@ -114,6 +148,8 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
 
         const result = await client.query(updateQuery, [student_id]);
         await client.query('COMMIT');
+
+        console.log(`✅ Payment verified and updated - student: ${student_id}, ref: ${reference}, amount: ${data.amount} pesewas`);
 
         res.json({
           success: true,
@@ -135,7 +171,7 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
       });
     }
   } catch (error) {
-    console.error('Payment verification error:', error);
+    console.error(`❌ Payment verification error - student: ${req.body.student_id}, ref: ${req.body.reference}:`, error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
@@ -144,8 +180,11 @@ export const getPaymentStatus = async (req: Request, res: Response): Promise<voi
   try {
     const { studentId } = req.params;
 
+    console.log(`📍 Checking payment status - student: ${studentId}`);
+
     // Special handling for admin - always consider as paid
     if (studentId === '22243185') {
+      console.log(`✅ Admin account detected (${studentId}) - payment not required`);
       res.json({
         has_paid: true,
         payment_date: null,
@@ -163,6 +202,7 @@ export const getPaymentStatus = async (req: Request, res: Response): Promise<voi
     const result = await pool.query(query, [studentId]);
 
     if (result.rows.length === 0) {
+      console.warn(`❌ Student not found - student: ${studentId}`);
       res.status(404).json({ error: 'Student not found' });
       return;
     }
@@ -178,35 +218,59 @@ export const getPaymentStatus = async (req: Request, res: Response): Promise<voi
 
       // If more than 30 days have passed, payment is no longer valid
       if (daysDifference > 30) {
+        console.log(`⚠️  Payment expired - student: ${studentId}, paid on: ${payment_date}, ${daysDifference} days ago`);
         isPaymentValid = false;
       }
     }
 
+    const daysRemaining = has_paid && payment_date ? Math.max(0, 30 - Math.floor((new Date().getTime() - new Date(payment_date).getTime()) / (1000 * 60 * 60 * 24))) : 0;
+    console.log(`✅ Payment status - student: ${studentId}, paid: ${isPaymentValid}, days_remaining: ${daysRemaining}`);
+
     res.json({
       has_paid: isPaymentValid,
       payment_date: payment_date,
-      days_remaining: has_paid && payment_date ? Math.max(0, 30 - Math.floor((new Date().getTime() - new Date(payment_date).getTime()) / (1000 * 60 * 60 * 24))) : 0,
+      days_remaining: daysRemaining,
     });
   } catch (error) {
-    console.error('Get payment status error:', error);
+    console.error(`❌ Get payment status error - student: ${req.params.studentId}:`, error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
 
 export const handleWebhook = async (req: Request, res: Response): Promise<void> => {
   try {
-    // Parse raw body for signature verification
-    const rawBody = req.body.toString();
+    // Safely obtain raw body for signature verification. The webhook route is
+    // mounted with express.raw so req.body should be a Buffer, but guard
+    // against other cases to avoid crashes.
+    const rawBody = Buffer.isBuffer(req.body)
+      ? req.body.toString()
+      : typeof req.body === 'string'
+      ? req.body
+      : JSON.stringify(req.body || {});
+
     const event = JSON.parse(rawBody);
 
-    // Verify webhook signature
-    const signature = req.headers['x-paystack-signature'] as string;
+    // Ensure webhook secret is configured
+    if (!PAYSTACK_WEBHOOK_SECRET) {
+      console.error('PAYSTACK_WEBHOOK_SECRET is not configured. Rejecting webhook.');
+      res.status(500).json({ error: 'Webhook secret not configured' });
+      return;
+    }
 
-    const hash = crypto.createHmac('sha512', PAYSTACK_WEBHOOK_SECRET!)
+    // Verify webhook signature
+    const signature = (req.headers['x-paystack-signature'] || req.headers['x-paystack_signature']) as string | undefined;
+    if (!signature) {
+      console.warn('Missing Paystack signature header');
+      res.sendStatus(401);
+      return;
+    }
+
+    const hash = crypto.createHmac('sha512', PAYSTACK_WEBHOOK_SECRET)
       .update(rawBody)
       .digest('hex');
 
     if (hash !== signature) {
+      console.warn('Invalid Paystack webhook signature');
       res.sendStatus(401);
       return;
     }

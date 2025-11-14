@@ -324,7 +324,7 @@ export class ReviewModel {
   }
 
   /**
-   * Check if user can review a product
+   * Check if user can review a product (top-level reviews only)
    * - User cannot review their own product
    * - User can only write one top-level review per product
    */
@@ -341,7 +341,7 @@ export class ReviewModel {
       }
 
       if (ownerResult.rows[0].student_id === studentId) {
-        return false; // User is the owner
+        return false; // User is the owner - cannot create top-level reviews
       }
 
       // Check if user already has a top-level review
@@ -353,6 +353,31 @@ export class ReviewModel {
       return reviewResult.rows.length === 0; // Can review if no existing top-level review
     } catch (error) {
       console.error('Error checking review permission:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Check if user can reply to a review/comment
+   * - Anyone can reply to reviews (including product owners)
+   * - Must be a valid comment that can have replies (depth < MAX_COMMENT_DEPTH)
+   */
+  static async canUserReplyToComment(studentId: string, commentId: number): Promise<boolean> {
+    try {
+      // Check if the comment exists and get its depth
+      const commentResult = await pool.query(
+        'SELECT id, depth FROM product_reviews WHERE id = $1',
+        [commentId]
+      );
+
+      if (commentResult.rows.length === 0) {
+        return false; // Comment doesn't exist
+      }
+
+      const depth = commentResult.rows[0].depth || 0;
+      return depth < MAX_COMMENT_DEPTH; // Can reply if not at max depth
+    } catch (error) {
+      console.error('Error checking reply permission:', error);
       throw error;
     }
   }

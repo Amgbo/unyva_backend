@@ -71,14 +71,17 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Middleware
+// NOTE: Register payment routes before body parsers so webhook raw body middleware
+// (express.raw) can access the original request bytes for signature verification.
+app.use('/api/payments', paymentRoutes);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Serve uploaded files statically
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
-// Payment routes (must be before json middleware for webhook raw body)
-app.use('/api/payments', paymentRoutes);
+// Payment routes (registered above so webhook raw body middleware works correctly)
 
 // Routes
 app.use("/api/products", productRoutes);
