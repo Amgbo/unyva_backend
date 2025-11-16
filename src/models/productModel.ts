@@ -17,6 +17,7 @@ export interface Product {
   view_count: number;
   price_negotiable: boolean;
   tags?: string[];
+  quantity: number;
   created_at: Date;
   updated_at: Date;
   last_bumped_at: Date;
@@ -70,6 +71,7 @@ export interface CreateProductData {
   room_number?: string;
   price_negotiable?: boolean;
   tags?: string[];
+  quantity: number;
   image_urls?: string[];
 }
 
@@ -235,6 +237,7 @@ export const createProduct = async (productData: CreateProductData): Promise<Pro
       room_number,
       price_negotiable = false,
       tags = [],
+      quantity,
       image_urls = []
     } = productData;
 
@@ -244,8 +247,8 @@ export const createProduct = async (productData: CreateProductData): Promise<Pro
     const query = `
       INSERT INTO products
       (student_id, title, price, description, category, condition, contact_method,
-       hall_id, room_number, status, is_approved, price_negotiable, tags, updated_at, last_bumped_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'available', true, $10, $11, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+       hall_id, room_number, status, is_approved, price_negotiable, tags, quantity, updated_at, last_bumped_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'available', true, $10, $11, $12, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       RETURNING *
     `;
 
@@ -260,7 +263,8 @@ export const createProduct = async (productData: CreateProductData): Promise<Pro
       hall_id,
       room_number,
       price_negotiable,
-      tags
+      tags,
+      quantity
     ];
 
     const result = await pool.query(query, values);
@@ -338,6 +342,10 @@ export const updateProduct = async (id: number, updateData: UpdateProductData): 
     if (updateData.tags !== undefined) {
       fields.push(`tags = $${paramCount++}`);
       values.push(updateData.tags);
+    }
+    if (updateData.quantity !== undefined) {
+      fields.push(`quantity = $${paramCount++}`);
+      values.push(updateData.quantity);
     }
 
     if (fields.length === 0) {
@@ -982,9 +990,9 @@ export const getSellerProductsGrouped = async (student_id: string): Promise<Sell
       FROM products p
       LEFT JOIN university_halls h ON p.hall_id = h.id
       LEFT JOIN product_images pi ON p.id = pi.product_id
-  -- Include products that have been marked 'sold' in the seller's "available" list
-  -- so sellers continue to see their items until they explicitly delete them.
-  WHERE p.student_id = $1 AND p.status IN ('available', 'sold')
+  -- Only show products with status 'available' in the seller's "available" list
+  -- Products remain perpetually available for purchase by other users
+  WHERE p.student_id = $1 AND p.status = 'available'
       GROUP BY p.id, h.full_name
       ORDER BY p.created_at DESC
     `;

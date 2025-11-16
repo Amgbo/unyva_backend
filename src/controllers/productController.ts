@@ -135,6 +135,7 @@ export const createNewProduct = async (req: AuthRequest, res: Response): Promise
       room_number: req.body.room_number,
       price_negotiable: req.body.price_negotiable || false,
       tags: req.body.tags ? (Array.isArray(req.body.tags) ? req.body.tags : [req.body.tags]) : [],
+      quantity: req.body.quantity ? parseInt(req.body.quantity, 10) : 1,
       image_urls: req.body.image_urls ? (Array.isArray(req.body.image_urls) ? req.body.image_urls : [req.body.image_urls]) : []
     };
 
@@ -538,14 +539,14 @@ export const confirmDelivered = async (req: AuthRequest, res: Response): Promise
     try {
       await client.query('BEGIN');
 
-      // Update product status to sold
-      const updateProductQuery = `
-        UPDATE products
-        SET status = 'sold', updated_at = CURRENT_TIMESTAMP
-        WHERE id = $1 AND student_id = $2
-        RETURNING *
-      `;
-      const productResult = await client.query(updateProductQuery, [productId, studentId]);
+      // Keep product status as 'available' so it remains purchasable by other users
+      // Product sales are tracked through the orders table, not product status
+      // For delivery confirmation, we don't change the status since delivery orders were set to 'pending'
+      // and pickup orders remain 'available'
+      const productResult = await client.query(
+        'SELECT * FROM products WHERE id = $1 AND student_id = $2',
+        [productId, studentId]
+      );
 
       // Update order status to delivered (only for delivery orders)
       const updateOrderQuery = `

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import path from 'path';
-import { getAnnouncements, getAnnouncementById, addAnnouncement } from '../controllers/announcementController.js';
+import { getAnnouncements, getAnnouncementById, addAnnouncement, deleteAnnouncement } from '../controllers/announcementController.js';
 import { authMiddleware } from '../middleware/authMiddleware.js';
 
 // File filter for images
@@ -38,5 +38,8 @@ router.get('/:id', getAnnouncementById);
 
 // POST /api/announcements - Add new announcement (protected, admin only)
 router.post('/', authMiddleware, upload.single('image'), addAnnouncement);
+
+// DELETE /api/announcements/:id - Delete announcement (protected, admin only)
+router.delete('/:id', authMiddleware, deleteAnnouncement);
 
 export { router as announcementRouter };

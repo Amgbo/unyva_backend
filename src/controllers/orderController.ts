@@ -86,14 +86,18 @@ export const createOrder = async (req: Request, res: Response): Promise<void> =>
       const orderResult = await client.query(orderQuery, orderValues);
       const order = orderResult.rows[0];
 
-      // Update product status to 'pending' for delivery or 'sold' for pickup after order creation
-      const productStatus = delivery_option === 'delivery' ? 'pending' : 'sold';
-      const updateProductStatusQuery = `
-        UPDATE products
-        SET status = $1, updated_at = CURRENT_TIMESTAMP
-        WHERE id = $2
-      `;
-      await client.query(updateProductStatusQuery, [productStatus, product_id]);
+      // Keep product status as 'available' so it remains purchasable by other users
+      // Product sales are tracked through the orders table, not product status
+      // For delivery orders, we still need to track pending status for delivery coordination
+      if (delivery_option === 'delivery') {
+        const updateProductStatusQuery = `
+          UPDATE products
+          SET status = 'pending', updated_at = CURRENT_TIMESTAMP
+          WHERE id = $1
+        `;
+        await client.query(updateProductStatusQuery, [product_id]);
+      }
+      // For pickup orders, keep product as 'available'
 
       // Create delivery request if delivery is selected
       if (delivery_option === 'delivery') {

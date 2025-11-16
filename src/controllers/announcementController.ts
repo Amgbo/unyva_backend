@@ -159,3 +159,57 @@ export const addAnnouncement = async (req: any, res: Response): Promise<void> =>
     });
   }
 };
+
+// DELETE /api/announcements/:id - Delete announcement (Admin only)
+export const deleteAnnouncement = async (req: any, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const studentId = req.user?.student_id;
+
+    console.log('🗑️ Deleting announcement:', id);
+
+    // Check if user is admin (student_id '22243185')
+    if (studentId !== '22243185') {
+      console.log('❌ Access denied: Non-admin user attempted to delete announcement');
+      res.status(403).json({
+        error: 'Access denied. Admin privileges required.'
+      });
+      return;
+    }
+
+    console.log('✅ Admin access verified for student:', studentId);
+
+    // Check if announcement exists
+    const checkResult = await pool.query(
+      'SELECT id, image_url FROM announcements WHERE id = $1',
+      [id]
+    );
+
+    if (checkResult.rows.length === 0) {
+      res.status(404).json({
+        error: 'Announcement not found'
+      });
+      return;
+    }
+
+    const announcement = checkResult.rows[0];
+
+    // Delete from database
+    await pool.query('DELETE FROM announcements WHERE id = $1', [id]);
+
+    // TODO: If there's an image_url, we might want to delete it from ImageKit as well
+    // For now, we'll just leave the image in storage
+
+    console.log('✅ Announcement deleted successfully');
+    res.status(200).json({
+      success: true,
+      message: 'Announcement deleted successfully'
+    });
+  } catch (err: any) {
+    console.error('❌ Delete Announcement Error:', err);
+    res.status(500).json({
+      error: 'Failed to delete announcement',
+      message: err.message
+    });
+  }
+};

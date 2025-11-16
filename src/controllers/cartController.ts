@@ -373,11 +373,8 @@ export const checkoutCart = async (req: AuthRequest, res: Response): Promise<voi
           deliveryRequests.push(deliveryResult.rows[0]);
         }
 
-        // Update product status to sold
-        await client.query(
-          'UPDATE products SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
-          ['sold', item.product_id]
-        );
+        // Keep product status as 'available' so it remains purchasable by other users
+        // Product sales are tracked through the orders table, not product status
       }
 
       // Clear cart items for this seller only

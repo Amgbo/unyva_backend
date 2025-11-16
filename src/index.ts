@@ -16,7 +16,7 @@ import categoryRoutes from "./routes/categoryRoutes.js";
 import universityHallRoutes from './routes/universityHallRoutes.js';
 import { studentRouter as studentRoutes } from './routes/studentroutes.js';
 import homeRoutes from './routes/homeRoutes.js';
-import adminRoutes from './routes/adminRoutes.js';
+import { adminRouter as adminRoutes } from './routes/adminRoutes.js';
 import serviceRoutes from './routes/serviceRoutes.js';
 import deliveryRoutes from './routes/deliveryRoutes.js';
 import orderRoutes from './routes/orderRoutes.js';
