@@ -289,6 +289,8 @@ export const getServiceReviews = async (
   try {
     const offset = (page - 1) * limit;
 
+    console.log(`🔍 Querying reviews for service ${serviceId}, page ${page}, limit ${limit}`);
+
     // Top-level reviews (parent_id IS NULL) with pagination
     const topLevelQuery = `
       SELECT
@@ -302,7 +304,6 @@ export const getServiceReviews = async (
         sr.comment,
         sr.is_verified,
         sr.created_at,
-        sr.updated_at,
         sr.parent_id,
         sr.depth,
         sr.thread_root_id,
@@ -328,7 +329,6 @@ export const getServiceReviews = async (
         sr.comment,
         sr.is_verified,
         sr.created_at,
-        sr.updated_at,
         sr.parent_id,
         sr.depth,
         sr.thread_root_id,
@@ -354,8 +354,10 @@ export const getServiceReviews = async (
 
     const topLevelReviews = topLevelResult.rows;
     const allReplies = allRepliesResult.rows;
-    const total = parseInt(countResult.rows[0].total, 10) || 0;
+    const total = parseInt(countResult.rows[0]?.total || '0', 10);
     const hasMore = total > page * limit;
+
+    console.log(`📊 Found ${topLevelReviews.length} top-level reviews, ${allReplies.length} replies, total count: ${total}`);
 
     // Build nested structure using enhanced recursive function
     const reviewsWithNestedReplies = topLevelReviews.map((review: any) => ({
@@ -369,7 +371,7 @@ export const getServiceReviews = async (
       hasMore
     };
   } catch (error) {
-    console.error('Database error in getServiceReviews:', error);
+    console.error('❌ Database error in getServiceReviews:', error);
     throw error;
   }
 };
@@ -1062,10 +1064,12 @@ export const markNotificationAsRead = async (notificationId: number): Promise<Se
 // Reviews (enhanced with depth and thread management)
 export const createReview = async (reviewData: Omit<ServiceReview, 'id' | 'created_at'> & { parent_id?: number | null }): Promise<ServiceReview> => {
   try {
-    // Validate max depth if this is a reply
+    let depth = 0;
+    let thread_root_id = null;
+
     if (reviewData.parent_id) {
       const parentResult = await pool.query(
-        'SELECT depth FROM service_reviews WHERE id = $1',
+        'SELECT depth, thread_root_id FROM service_reviews WHERE id = $1',
         [reviewData.parent_id]
       );
 
@@ -1073,19 +1077,22 @@ export const createReview = async (reviewData: Omit<ServiceReview, 'id' | 'creat
         throw new Error('Parent review not found');
       }
 
-      const parentDepth = parentResult.rows[0].depth;
-      if (parentDepth >= 2) { // Max depth is 2 (3 levels total)
+      const parent = parentResult.rows[0];
+      depth = (parent.depth || 0) + 1;
+      thread_root_id = parent.thread_root_id;
+
+      if (depth > 2) {
         throw new Error('Cannot nest comments more than 3 levels deep');
       }
     }
 
-    // Allow replies by accepting parent_id. Replies should set rating = 0 by controller when appropriate.
     const query = `
       INSERT INTO service_reviews
       (service_id, booking_id, customer_id, provider_id, rating, title, comment, is_verified, parent_id, depth, thread_root_id)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 0, NULL)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       RETURNING *
     `;
+
     const values = [
       reviewData.service_id,
       reviewData.booking_id ?? null,
@@ -1095,11 +1102,22 @@ export const createReview = async (reviewData: Omit<ServiceReview, 'id' | 'creat
       reviewData.title ?? null,
       reviewData.comment ?? null,
       reviewData.is_verified ?? false,
-      reviewData.parent_id ?? null
+      reviewData.parent_id ?? null,
+      depth,
+      thread_root_id
     ];
-    const result = await pool.query(query, values);
 
+    const result = await pool.query(query, values);
     const review = result.rows[0];
+
+    // Set thread_root_id for top-level reviews
+    if (!reviewData.parent_id) {
+      await pool.query(
+        'UPDATE service_reviews SET thread_root_id = $1 WHERE id = $2',
+        [review.id, review.id]
+      );
+      review.thread_root_id = review.id;
+    }
 
     // Update provider rating after creating review (only for top-level reviews)
     if (!reviewData.parent_id) {

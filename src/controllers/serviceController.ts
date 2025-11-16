@@ -345,6 +345,8 @@ export const getServiceReviewsController = async (req: Request<{ id: string }>, 
     const page = req.query.page ? parseInt(req.query.page as string, 10) : 1;
     const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 10;
 
+    console.log(`📝 Fetching reviews for service ${serviceId}, page ${page}`);
+
     if (isNaN(serviceId)) {
       res.status(400).json({
         success: false,
@@ -354,6 +356,8 @@ export const getServiceReviewsController = async (req: Request<{ id: string }>, 
     }
 
     const { reviews, total, hasMore } = await getServiceReviews(serviceId, page, limit);
+
+    console.log(`✅ Successfully fetched ${reviews.length} reviews for service ${serviceId}`);
 
     res.status(200).json({
       success: true,
@@ -365,10 +369,11 @@ export const getServiceReviewsController = async (req: Request<{ id: string }>, 
     });
   } catch (error) {
     console.error('❌ Error fetching service reviews:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     res.status(500).json({
       success: false,
       error: 'Failed to fetch service reviews',
-      message: error instanceof Error ? error.message : 'Unknown error'
+      message: errorMessage
     });
   }
 };
