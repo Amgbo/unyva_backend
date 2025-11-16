@@ -14,6 +14,7 @@ import {
   createBooking,
   getBookingById,
   getProviderBookings,
+  getProviderServicesGrouped,
   getBuyerBookings,
   updateBookingStatus,
   createNotification,
@@ -86,12 +87,17 @@ export const getMyServices = async (req: AuthRequest, res: Response): Promise<vo
       return;
     }
 
-    const services = await getServicesByStudent(studentId);
+    // Return grouped services: available (includes reserved), pending bookings, and booked/completed bookings (one row per booking)
+    const grouped = await getProviderServicesGrouped(studentId);
 
     res.status(200).json({
       success: true,
-      count: services.length,
-      services
+      counts: {
+        available: grouped.available.length,
+        pending: grouped.pending.length,
+        booked: grouped.booked.length
+      },
+      ...grouped
     });
   } catch (error) {
     console.error('❌ Error fetching user services:', error);
@@ -719,19 +725,15 @@ export const createReviewController = async (req: AuthRequest, res: Response): P
       return;
     }
 
-    // If this is a reply, validate permissions
+    // If this is a reply, validate permissions (all authenticated users can reply)
     if (parent_id) {
       const canReply = await canUserReplyToServiceComment(studentId, parent_id);
       if (!canReply) {
-        // Additional check: allow service providers to reply to reviews on their services
-        const isServiceProvider = service.student_id === studentId;
-        if (!isServiceProvider) {
-          res.status(403).json({
-            success: false,
-            error: 'You cannot reply to this comment'
-          });
-          return;
-        }
+        res.status(403).json({
+          success: false,
+          error: 'You cannot reply to this comment'
+        });
+        return;
       }
     }
 

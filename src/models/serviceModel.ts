@@ -255,7 +255,7 @@ export const getRelatedServices = async (
       FROM services s
       LEFT JOIN university_halls h ON s.hall_id = h.id
       WHERE s.category = $1
-        AND s.status = 'available'
+        AND s.status IN ('available', 'reserved')
         AND s.is_approved = true
         AND s.id != $2
     `;
@@ -631,8 +631,8 @@ export const searchServices = async (filters: SearchFilters): Promise<SearchResu
       sortBy = 'created_at'
     } = filters;
 
-    const whereClauses: string[] = ['s.status = $1', 's.is_approved = $2'];
-    const values: any[] = ['available', true];
+    const whereClauses: string[] = ['s.status IN ($1, $2)', 's.is_approved = $3'];
+    const values: any[] = ['available', 'reserved', true];
     let paramIndex = values.length + 1; // next available param position
 
     // search text
@@ -852,6 +852,121 @@ export const getProviderBookings = async (providerId: string): Promise<ServiceBo
   }
 };
 
+// -------------------------
+// Get provider services grouped by status (available, pending bookings, booked/completed bookings)
+export const getProviderServicesGrouped = async (providerId: string) => {
+  try {
+    // Available services: include reserved so providers keep seeing booked services until they delete them
+    const availableQuery = `
+      SELECT
+        s.*,
+        h.full_name as hall_name,
+        COALESCE((SELECT array_agg(si.image_url) FROM service_images si WHERE si.service_id = s.id), ARRAY[]::text[]) as images
+      FROM services s
+      LEFT JOIN university_halls h ON s.hall_id = h.id
+      WHERE s.student_id = $1 AND s.status IN ('available', 'reserved')
+      ORDER BY s.created_at DESC
+    `;
+
+    // Pending bookings (booking requests awaiting confirmation)
+    const pendingQuery = `
+      SELECT
+        s.*,
+        h.full_name as hall_name,
+        COALESCE((SELECT array_agg(si.image_url) FROM service_images si WHERE si.service_id = s.id), ARRAY[]::text[]) as images,
+        sb.id as booking_id,
+        sb.customer_id,
+        sb.booking_date,
+        sb.booking_time,
+        sb.duration,
+        sb.price as booking_price,
+        sb.notes as booking_notes,
+        sb.created_at as booking_created_at,
+        c.first_name as customer_first_name,
+        c.last_name as customer_last_name,
+        c.phone as customer_phone,
+        c.email as customer_email
+      FROM services s
+      LEFT JOIN university_halls h ON s.hall_id = h.id
+      LEFT JOIN service_bookings sb ON sb.service_id = s.id AND sb.status = 'pending' AND sb.provider_id = $1
+      LEFT JOIN students c ON sb.customer_id = c.student_id
+      WHERE s.student_id = $1
+      GROUP BY s.id, h.full_name, sb.id, sb.customer_id, sb.booking_date, sb.booking_time, sb.duration, sb.price, sb.notes, sb.created_at, c.first_name, c.last_name, c.phone, c.email
+      ORDER BY sb.created_at DESC
+    `;
+
+    // Booked/completed bookings: return one row per booking so provider sees every booking separately
+    const bookedQuery = `
+      SELECT
+        s.*,
+        sb.id as booking_id,
+        sb.customer_id,
+        sb.booking_date,
+        sb.booking_time,
+        sb.duration,
+        sb.price as booking_price,
+        sb.notes as booking_notes,
+        sb.status as booking_status,
+        sb.created_at as booking_created_at,
+        c.first_name as customer_first_name,
+        c.last_name as customer_last_name,
+        c.phone as customer_phone,
+        c.email as customer_email,
+        h.full_name as hall_name,
+        COALESCE((SELECT array_agg(si.image_url) FROM service_images si WHERE si.service_id = s.id), ARRAY[]::text[]) as images
+      FROM service_bookings sb
+      JOIN services s ON sb.service_id = s.id
+      LEFT JOIN students c ON sb.customer_id = c.student_id
+      LEFT JOIN university_halls h ON s.hall_id = h.id
+      WHERE sb.provider_id = $1 AND sb.status IN ('confirmed', 'in_progress', 'completed')
+      ORDER BY sb.created_at DESC
+    `;
+
+    const [availableResult, pendingResult, bookedResult] = await Promise.all([
+      pool.query(availableQuery, [providerId]),
+      pool.query(pendingQuery, [providerId]),
+      pool.query(bookedQuery, [providerId])
+    ]);
+
+    const available = availableResult.rows.map(row => ({
+      ...row,
+      images: Array.isArray(row.images) ? row.images : []
+    }));
+
+    const pending = pendingResult.rows
+      .filter(row => row.booking_id)
+      .map(row => ({
+        service: {
+          ...row,
+          images: Array.isArray(row.images) ? row.images : []
+        },
+        booking: {
+          id: row.booking_id as number,
+          customer_first_name: row.customer_first_name as string,
+          customer_last_name: row.customer_last_name as string,
+          customer_phone: row.customer_phone as string,
+          customer_email: row.customer_email as string | undefined,
+          booking_date: row.booking_date,
+          booking_time: row.booking_time,
+          duration: row.duration,
+          price: row.booking_price,
+          notes: row.booking_notes,
+          created_at: row.booking_created_at
+        }
+      }));
+
+    const booked = bookedResult.rows.map(row => ({
+      ...row,
+      images: Array.isArray(row.images) ? row.images : []
+    }));
+
+    return { available, pending, booked };
+  } catch (error) {
+    console.error('Database error in getProviderServicesGrouped:', error);
+    throw error;
+  }
+};
+
 export const getBuyerBookings = async (buyerId: string): Promise<ServiceBooking[]> => {
   try {
     const query = `
@@ -1018,7 +1133,7 @@ export const getFeaturedServices = async (limit: number = 10, excludeStudentId?:
       FROM services s
       LEFT JOIN university_halls h ON s.hall_id = h.id
       LEFT JOIN students p ON s.student_id = p.student_id
-      WHERE s.status = 'available' AND s.is_approved = true
+      WHERE s.status IN ('available', 'reserved') AND s.is_approved = true
     `;
 
     if (excludeStudentId) {
@@ -1058,7 +1173,7 @@ export const getRecentServices = async (limit: number = 10): Promise<ServiceWith
       FROM services s
       LEFT JOIN university_halls h ON s.hall_id = h.id
       LEFT JOIN students p ON s.student_id = p.student_id
-      WHERE s.status = 'available' AND s.is_approved = true
+      WHERE s.status IN ('available', 'reserved') AND s.is_approved = true
       ORDER BY s.created_at DESC
       LIMIT $1
     `;

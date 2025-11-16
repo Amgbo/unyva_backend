@@ -174,7 +174,7 @@ export const getProductsByStudent = async (student_id: string): Promise<ProductW
   }
 };
 
-// Get single product by ID
+// Get product by id
 export const getProductById = async (id: number): Promise<ProductWithImages | null> => {
   try {
     const query = `
@@ -204,14 +204,11 @@ export const getProductById = async (id: number): Promise<ProductWithImages | nu
       LEFT JOIN product_images pi ON p.id = pi.product_id
       WHERE p.id = $1
       GROUP BY p.id, h.full_name, s.first_name, s.last_name
+      LIMIT 1
     `;
 
     const result = await pool.query(query, [id]);
-
-    if (result.rows.length === 0) {
-      return null;
-    }
-
+    if (result.rows.length === 0) return null;
     const row = result.rows[0];
     return {
       ...row,
@@ -589,7 +586,7 @@ export const getFeaturedProducts = async (limit: number = 10, excludeStudentId?:
       LEFT JOIN university_halls h ON p.hall_id = h.id
       LEFT JOIN students s ON p.student_id = s.student_id
       LEFT JOIN product_images pi ON p.id = pi.product_id
-      WHERE p.status = 'available' AND p.is_approved = true
+      WHERE p.status IN ('available', 'sold', 'pending') AND p.is_approved = true
     `;
 
     const values: any[] = [];
@@ -647,7 +644,7 @@ export const getRecentProducts = async (limit: number = 20, excludeStudentId?: s
       LEFT JOIN university_halls h ON p.hall_id = h.id
       LEFT JOIN students s ON p.student_id = s.student_id
       LEFT JOIN product_images pi ON p.id = pi.product_id
-      WHERE p.status = 'available' AND p.is_approved = true
+      WHERE p.status IN ('available', 'sold', 'pending') AND p.is_approved = true
         AND p.created_at >= NOW() - INTERVAL '48 hours'
     `;
 
@@ -714,7 +711,7 @@ export const getProductsByCategory = async (
       LEFT JOIN university_halls h ON p.hall_id = h.id
       LEFT JOIN students s ON p.student_id = s.student_id
       LEFT JOIN product_images pi ON p.id = pi.product_id
-      WHERE p.status = 'available' AND p.is_approved = true AND p.category = $1
+      WHERE p.status IN ('available', 'sold', 'pending') AND p.is_approved = true AND p.category = $1
     `;
 
     const values: any[] = [category];
@@ -792,7 +789,7 @@ export const getRelatedProducts = async (
       LEFT JOIN university_halls h ON p.hall_id = h.id
       LEFT JOIN students s ON p.student_id = s.student_id
       LEFT JOIN product_images pi ON p.id = pi.product_id
-      WHERE p.status = 'available' AND p.is_approved = true AND p.id != $1 AND p.category = $2
+        WHERE p.status IN ('available', 'sold', 'pending') AND p.is_approved = true AND p.id != $1 AND p.category = $2
     `;
 
     const values: any[] = [productId, category];
@@ -835,7 +832,7 @@ export const getSearchFilters = async () => {
         array_agg(DISTINCT category) as values,
         count(DISTINCT category) as count
       FROM products
-      WHERE status = 'available' AND is_approved = true
+        WHERE status IN ('available', 'sold', 'pending') AND is_approved = true
 
       UNION ALL
 
@@ -844,7 +841,7 @@ export const getSearchFilters = async () => {
         array_agg(DISTINCT condition) as values,
         count(DISTINCT condition) as count
       FROM products
-      WHERE status = 'available' AND is_approved = true
+        WHERE status IN ('available', 'sold', 'pending') AND is_approved = true
 
       UNION ALL
 
@@ -854,7 +851,7 @@ export const getSearchFilters = async () => {
         count(DISTINCT h.id) as count
       FROM products p
       JOIN university_halls h ON p.hall_id = h.id
-      WHERE p.status = 'available' AND p.is_approved = true
+        WHERE p.status IN ('available', 'sold', 'pending') AND p.is_approved = true
 
       UNION ALL
 
@@ -881,7 +878,7 @@ export const getSearchFilters = async () => {
           END
         ) as count
       FROM products
-      WHERE status = 'available' AND is_approved = true AND price > 0
+        WHERE status IN ('available', 'sold', 'pending') AND is_approved = true AND price > 0
     `;
 
     const result = await pool.query(query);
@@ -932,7 +929,7 @@ export const getProductSuggestions = async (
       LEFT JOIN university_halls h ON p.hall_id = h.id
       LEFT JOIN students s ON p.student_id = s.student_id
       LEFT JOIN product_images pi ON p.id = pi.product_id
-      WHERE p.status = 'available'
+        WHERE p.status IN ('available', 'sold', 'pending')
         AND p.is_approved = true
         AND p.student_id != $1
       GROUP BY p.id, h.full_name, s.first_name, s.last_name
@@ -985,7 +982,9 @@ export const getSellerProductsGrouped = async (student_id: string): Promise<Sell
       FROM products p
       LEFT JOIN university_halls h ON p.hall_id = h.id
       LEFT JOIN product_images pi ON p.id = pi.product_id
-      WHERE p.student_id = $1 AND p.status = 'available'
+  -- Include products that have been marked 'sold' in the seller's "available" list
+  -- so sellers continue to see their items until they explicitly delete them.
+  WHERE p.student_id = $1 AND p.status IN ('available', 'sold')
       GROUP BY p.id, h.full_name
       ORDER BY p.created_at DESC
     `;
@@ -1030,34 +1029,45 @@ export const getSellerProductsGrouped = async (student_id: string): Promise<Sell
       ORDER BY p.created_at DESC
     `;
 
-    // Get sold products
-    const soldQuery = `
-      SELECT
-        p.*,
-        h.full_name as hall_name,
-        COALESCE(
-          JSON_AGG(
-            JSON_BUILD_OBJECT(
-              'id', pi.id,
-              'product_id', pi.product_id,
-              'image_url', pi.image_url,
-              'thumbnail_url', pi.thumbnail_url,
-              'is_primary', pi.is_primary,
-              'upload_order', pi.upload_order,
-              'file_size', pi.file_size,
-              'storage_path', pi.storage_path,
-              'created_at', pi.created_at
-            )
-          ) FILTER (WHERE pi.id IS NOT NULL),
-          '[]'
-        ) as images
-      FROM products p
-      LEFT JOIN university_halls h ON p.hall_id = h.id
-      LEFT JOIN product_images pi ON p.id = pi.product_id
-      WHERE p.student_id = $1 AND p.status = 'sold'
-      GROUP BY p.id, h.full_name
-      ORDER BY p.updated_at DESC
-    `;
+  // Get sold products as per-order rows so the same product appears once per completed order.
+  // This allows the seller's Sold tab to list an item multiple times if it was sold multiple times.
+  const soldQuery = `
+    SELECT
+      p.*, 
+      o.id as order_id,
+      o.quantity as order_quantity,
+      o.delivery_option as order_delivery_option,
+      o.created_at as order_created_at,
+      c.first_name as customer_first_name,
+      c.last_name as customer_last_name,
+      c.phone as customer_phone,
+      c.email as customer_email,
+      h.full_name as hall_name,
+      COALESCE(
+        JSON_AGG(
+          JSON_BUILD_OBJECT(
+            'id', pi.id,
+            'product_id', pi.product_id,
+            'image_url', pi.image_url,
+            'thumbnail_url', pi.thumbnail_url,
+            'is_primary', pi.is_primary,
+            'upload_order', pi.upload_order,
+            'file_size', pi.file_size,
+            'storage_path', pi.storage_path,
+            'created_at', pi.created_at
+          )
+        ) FILTER (WHERE pi.id IS NOT NULL),
+        '[]'
+      ) as images
+    FROM orders o
+    JOIN products p ON o.product_id = p.id
+    LEFT JOIN students c ON o.customer_id = c.student_id
+    LEFT JOIN university_halls h ON p.hall_id = h.id
+    LEFT JOIN product_images pi ON p.id = pi.product_id
+    WHERE o.seller_id = $1 AND o.status IN ('confirmed', 'delivered')
+    GROUP BY o.id, p.id, c.first_name, c.last_name, c.phone, c.email, h.full_name
+    ORDER BY o.created_at DESC
+  `;
 
     const [availableResult, pendingResult, soldResult] = await Promise.all([
       pool.query(availableQuery, [student_id]),

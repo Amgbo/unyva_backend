@@ -84,24 +84,14 @@ export const createReview = async (req: AuthRequest, res: Response): Promise<voi
         return;
       }
     } else {
-      // Reply: check if user can reply to this comment
+      // Reply: check if user can reply to this comment (all authenticated users can reply)
       const canReply = await ReviewModel.canReplyToComment(parent_id);
       if (!canReply) {
-        // Additional check: allow product owners to reply to reviews on their products
-        const productOwnerQuery = await pool.query(
-          'SELECT student_id FROM products WHERE id = $1',
-          [product_id]
-        );
-        const isProductOwner = productOwnerQuery.rows.length > 0 &&
-                              productOwnerQuery.rows[0].student_id === studentId;
-
-        if (!isProductOwner) {
-          res.status(403).json({
-            success: false,
-            error: 'You cannot reply to this comment'
-          });
-          return;
-        }
+        res.status(403).json({
+          success: false,
+          error: 'You cannot reply to this comment'
+        });
+        return;
       }
     }
 

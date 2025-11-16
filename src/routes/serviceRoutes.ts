@@ -51,7 +51,7 @@ router.put('/bookings/:booking_id/status', updateBookingStatusController);
 router.get('/notifications', getNotificationsController);
 router.put('/notifications/:notification_id/read', markNotificationReadController);
 
-// Reviews
+// Reviews - protected routes
 router.post('/reviews', createReviewController);
 router.post('/:id/reviews', createReviewController);
 router.delete('/:id/reviews/:reviewId', deleteServiceReviewController);
