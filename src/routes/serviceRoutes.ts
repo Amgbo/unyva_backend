@@ -7,7 +7,6 @@ import {
   updateExistingService,
   deleteExistingService,
   getServiceReviewsController,
-  getRelatedServicesController,
   getProviderStatsController,
   createBookingController,
   getProviderBookingsController,
@@ -21,41 +20,56 @@ import {
   getUserReviewForServiceController,
   getFeaturedServicesController
 } from '../controllers/serviceController.js';
+
 import { verifyToken } from '../middleware/authMiddleware.js';
 
 const router = Router();
 
-// ---------- Public Routes ----------
+/* ------------------------------------
+   PUBLIC ROUTES
+------------------------------------ */
 router.get('/', getServices);
 router.get('/featured', getFeaturedServicesController);
-router.get('/:id(\\d+)', getService);
-router.get('/:id(\\d+)/reviews', getServiceReviewsController);
 
-// ---------- Protected routes ----------
+/* ⚠️ DO NOT PUT /:id BEFORE OTHER ROUTES 
+   It will catch everything and break path-to-regexp
+*/
+
+/* ------------------------------------
+   PROTECTED ROUTES
+------------------------------------ */
 router.use(verifyToken);
 
-// Service management
+/* Service management */
 router.post('/', createNewService);
-router.put('/:id(\\d+)', updateExistingService);
-router.delete('/:id(\\d+)', deleteExistingService);
 router.get('/provider/my-services', getMyServices);
 router.get('/provider/stats', getProviderStatsController);
+router.put('/:id', updateExistingService);
+router.delete('/:id', deleteExistingService);
 
-// Bookings
+/* Bookings */
 router.post('/bookings', createBookingController);
 router.get('/provider/bookings', getProviderBookingsController);
 router.get('/buyer/bookings', getBuyerBookingsController);
-router.put('/bookings/:booking_id(\\d+)/status', updateBookingStatusController);
+router.put('/bookings/:booking_id/status', updateBookingStatusController);
 
-// Notifications
+/* Notifications */
 router.get('/notifications', getNotificationsController);
-router.put('/notifications/:notification_id(\\d+)/read', markNotificationReadController);
+router.put('/notifications/:notification_id/read', markNotificationReadController);
 
-// Reviews
+/* Reviews */
 router.post('/reviews', createReviewController);
-router.post('/:id(\\d+)/reviews', createReviewController);
-router.delete('/:id(\\d+)/reviews/:reviewId(\\d+)', deleteServiceReviewController);
-router.get('/:id(\\d+)/reviews/can-review', canUserReviewServiceController);
-router.get('/:id(\\d+)/reviews/my-review', getUserReviewForServiceController);
+
+/* Add these BEFORE /:id */
+router.get('/:id/reviews', getServiceReviewsController);
+router.post('/:id/reviews', createReviewController);
+router.get('/:id/reviews/can-review', canUserReviewServiceController);
+router.get('/:id/reviews/my-review', getUserReviewForServiceController);
+router.delete('/:id/reviews/:reviewId', deleteServiceReviewController);
+
+/* ------------------------------------
+   PLACE /:id AT THE BOTTOM
+------------------------------------ */
+router.get('/:id', getService);
 
 export default router;
