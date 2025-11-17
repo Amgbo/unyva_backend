@@ -24,6 +24,15 @@ export const createOrder = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
+    // Validate quantity is positive
+    if (quantity <= 0) {
+      res.status(400).json({
+        success: false,
+        message: 'Quantity must be greater than 0'
+      });
+      return;
+    }
+
     // Validate delivery option
     if (!['pickup', 'delivery'].includes(delivery_option)) {
       res.status(400).json({
@@ -33,19 +42,19 @@ export const createOrder = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
-    // Get product details
+    // Get product details and validate quantity availability
     const productQuery = `
       SELECT p.*, s.student_id as seller_id, p.hall_id as seller_hall_id, p.room_number as seller_room_number
       FROM products p
       JOIN students s ON p.student_id = s.student_id
-      WHERE p.id = $1 AND p.status = 'available'
+      WHERE p.id = $1 AND p.status = 'available' AND p.quantity >= $2
     `;
-    const productResult = await pool.query(productQuery, [product_id]);
+    const productResult = await pool.query(productQuery, [product_id, quantity]);
 
     if (productResult.rows.length === 0) {
       res.status(404).json({
         success: false,
-        message: 'Product not found or not available'
+        message: 'Product not found, not available, or insufficient quantity'
       });
       return;
     }
@@ -86,9 +95,16 @@ export const createOrder = async (req: Request, res: Response): Promise<void> =>
       const orderResult = await client.query(orderQuery, orderValues);
       const order = orderResult.rows[0];
 
-      // Keep product status as 'available' so it remains purchasable by other users
-      // Product sales are tracked through the orders table, not product status
-      // For delivery orders, we still need to track pending status for delivery coordination
+      // Update product quantity after successful order creation
+      const updateQuantityQuery = `
+        UPDATE products
+        SET quantity = quantity - $1, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2
+      `;
+      await client.query(updateQuantityQuery, [quantity, product_id]);
+
+      // For delivery orders, set status to 'pending' for delivery coordination
+      // For pickup orders, keep product as 'available' but with reduced quantity
       if (delivery_option === 'delivery') {
         const updateProductStatusQuery = `
           UPDATE products
@@ -97,7 +113,7 @@ export const createOrder = async (req: Request, res: Response): Promise<void> =>
         `;
         await client.query(updateProductStatusQuery, [product_id]);
       }
-      // For pickup orders, keep product as 'available'
+      // For pickup orders, keep product as 'available' with reduced quantity
 
       // Create delivery request if delivery is selected
       if (delivery_option === 'delivery') {
@@ -121,7 +137,7 @@ export const createOrder = async (req: Request, res: Response): Promise<void> =>
         // Delivery will remain pending for manual acceptance by delivery persons
       }
 
-      // Clear cart item if it exists
+      // Clear cart item if it exists (only for single item orders, not bulk cart checkout)
       await client.query(
         'DELETE FROM cart WHERE student_id = $1 AND product_id = $2',
         [customer_id, product_id]

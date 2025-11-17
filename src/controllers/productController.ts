@@ -211,7 +211,8 @@ export const updateExistingProduct = async (req: AuthRequest, res: Response): Pr
       room_number: req.body.room_number,
       status: req.body.status,
       price_negotiable: req.body.price_negotiable,
-      tags: req.body.tags
+      tags: req.body.tags,
+      quantity: req.body.quantity ? parseInt(req.body.quantity, 10) : undefined
     };
 
     const updatedProduct = await updateProduct(productId, updateData);
