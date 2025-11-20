@@ -1146,6 +1146,243 @@ SELECT id, parent_id, depth, thread_root_id
 FROM service_reviews 
 ORDER BY id DESC LIMIT 10;
 -- Should show depth values (0, 1, or 2)
-```
 
----
+
+
+
+-- ============================================
+-- SERVICE REVIEWS SYSTEM ENHANCEMENTS
+-- Date: November 19, 2025
+-- Purpose: Fix and enhance service review system
+-- ============================================
+
+-- ============================================
+-- PART 1: ENSURE PARENT_ID COLUMN EXISTS
+-- ============================================
+
+-- Add parent_id column for nested replies (if not already present)
+ALTER TABLE service_reviews 
+ADD COLUMN IF NOT EXISTS parent_id INTEGER REFERENCES service_reviews(id) ON DELETE CASCADE;
+
+-- Create index for parent_id lookups
+CREATE INDEX IF NOT EXISTS idx_service_reviews_parent_id 
+ON service_reviews(parent_id);
+
+-- ============================================
+-- PART 2: FIX RATING CONSTRAINTS FOR NESTED COMMENTS
+-- ============================================
+
+-- Drop existing rating check if needed
+ALTER TABLE service_reviews
+DROP CONSTRAINT IF EXISTS service_reviews_rating_check;
+
+-- Add improved rating constraint
+-- Top-level reviews (parent_id IS NULL) must have rating 1-5
+-- Nested replies (parent_id IS NOT NULL) should have NULL rating
+ALTER TABLE service_reviews
+ADD CONSTRAINT service_reviews_rating_check
+CHECK (
+  (parent_id IS NULL AND rating BETWEEN 1 AND 5) OR
+  (parent_id IS NOT NULL AND (rating IS NULL OR rating = 0))
+);
+
+-- ============================================
+-- PART 3: ADD RATING COLUMNS TO SERVICES TABLE
+-- ============================================
+
+-- Add rating aggregation columns to services table
+ALTER TABLE services
+ADD COLUMN IF NOT EXISTS rating DECIMAL(3,2) DEFAULT 0,
+ADD COLUMN IF NOT EXISTS review_count INTEGER DEFAULT 0;
+
+-- Add indexes for efficient filtering and sorting
+CREATE INDEX IF NOT EXISTS idx_services_rating ON services(rating);
+CREATE INDEX IF NOT EXISTS idx_services_review_count ON services(review_count);
+
+-- Add comments for documentation
+COMMENT ON COLUMN services.rating IS 'Average rating from service reviews (calculated from top-level reviews only)';
+COMMENT ON COLUMN services.review_count IS 'Total count of top-level reviews (excludes nested replies)';
+
+-- ============================================
+-- PART 4: CREATE SERVICE RATING UPDATE TRIGGER
+-- ============================================
+
+-- Function to update service rating when reviews are added/updated/deleted
+CREATE OR REPLACE FUNCTION update_service_rating()
+RETURNS TRIGGER AS $$
+DECLARE
+  service_id_to_update INTEGER;
+BEGIN
+  -- Determine which service to update
+  IF TG_OP = 'DELETE' THEN
+    service_id_to_update := OLD.service_id;
+  ELSE
+    service_id_to_update := NEW.service_id;
+  END IF;
+
+  -- Only update for top-level reviews (parent_id IS NULL)
+  IF (TG_OP = 'DELETE' AND OLD.parent_id IS NULL) OR 
+     (TG_OP IN ('INSERT', 'UPDATE') AND NEW.parent_id IS NULL) THEN
+    
+    UPDATE services
+    SET 
+      rating = (
+        SELECT COALESCE(AVG(rating), 0)
+        FROM service_reviews
+        WHERE service_id = service_id_to_update 
+        AND parent_id IS NULL
+        AND rating IS NOT NULL
+      ),
+      review_count = (
+        SELECT COUNT(*)
+        FROM service_reviews
+        WHERE service_id = service_id_to_update 
+        AND parent_id IS NULL
+      )
+    WHERE id = service_id_to_update;
+  END IF;
+
+  IF TG_OP = 'DELETE' THEN
+    RETURN OLD;
+  ELSE
+    RETURN NEW;
+  END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Drop existing trigger if it exists
+DROP TRIGGER IF EXISTS trigger_update_service_rating ON service_reviews;
+
+-- Create trigger for service rating updates
+CREATE TRIGGER trigger_update_service_rating
+AFTER INSERT OR UPDATE OR DELETE ON service_reviews
+FOR EACH ROW
+EXECUTE FUNCTION update_service_rating();
+
+-- ============================================
+-- PART 5: CREATE PROVIDER RATING UPDATE TRIGGER
+-- ============================================
+
+-- Function to update provider's service rating when reviews are added/updated/deleted
+CREATE OR REPLACE FUNCTION update_provider_rating()
+RETURNS TRIGGER AS $$
+DECLARE
+  provider_id_to_update VARCHAR(20);
+BEGIN
+  -- Determine which provider to update
+  IF TG_OP = 'DELETE' THEN
+    provider_id_to_update := OLD.provider_id;
+  ELSE
+    provider_id_to_update := NEW.provider_id;
+  END IF;
+
+  -- Only update for top-level reviews (parent_id IS NULL)
+  IF (TG_OP = 'DELETE' AND OLD.parent_id IS NULL) OR 
+     (TG_OP IN ('INSERT', 'UPDATE') AND NEW.parent_id IS NULL) THEN
+    
+    UPDATE students
+    SET 
+      service_provider_rating = (
+        SELECT COALESCE(AVG(rating), 5.0)
+        FROM service_reviews
+        WHERE provider_id = provider_id_to_update 
+        AND parent_id IS NULL
+        AND rating IS NOT NULL
+      ),
+      service_review_count = (
+        SELECT COUNT(*)
+        FROM service_reviews
+        WHERE provider_id = provider_id_to_update 
+        AND parent_id IS NULL
+      )
+    WHERE student_id = provider_id_to_update;
+  END IF;
+
+  IF TG_OP = 'DELETE' THEN
+    RETURN OLD;
+  ELSE
+    RETURN NEW;
+  END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Drop existing trigger if it exists
+DROP TRIGGER IF EXISTS trigger_update_provider_rating ON service_reviews;
+
+-- Create trigger for provider rating updates
+CREATE TRIGGER trigger_update_provider_rating
+AFTER INSERT OR UPDATE OR DELETE ON service_reviews
+FOR EACH ROW
+EXECUTE FUNCTION update_provider_rating();
+
+-- ============================================
+-- PART 6: ADD PERFORMANCE INDEXES
+-- ============================================
+
+-- Composite index for common nested comment queries
+CREATE INDEX IF NOT EXISTS idx_service_reviews_service_parent_depth 
+ON service_reviews(service_id, parent_id, depth, created_at DESC);
+
+-- Index for thread-based queries
+CREATE INDEX IF NOT EXISTS idx_service_reviews_thread_created 
+ON service_reviews(thread_root_id, created_at DESC);
+
+-- Index for provider review lookups
+CREATE INDEX IF NOT EXISTS idx_service_reviews_provider_parent 
+ON service_reviews(provider_id, parent_id);
+
+-- ============================================
+-- PART 7: BACKFILL EXISTING DATA
+-- ============================================
+
+-- Update existing service ratings based on current reviews
+UPDATE services s
+SET 
+  rating = COALESCE((
+    SELECT AVG(rating)
+    FROM service_reviews
+    WHERE service_id = s.id 
+    AND parent_id IS NULL
+    AND rating IS NOT NULL
+  ), 0),
+  review_count = COALESCE((
+    SELECT COUNT(*)
+    FROM service_reviews
+    WHERE service_id = s.id 
+    AND parent_id IS NULL
+  ), 0);
+
+-- Update existing provider ratings based on current reviews
+UPDATE students st
+SET 
+  service_provider_rating = COALESCE((
+    SELECT AVG(rating)
+    FROM service_reviews
+    WHERE provider_id = st.student_id 
+    AND parent_id IS NULL
+    AND rating IS NOT NULL
+  ), 5.0),
+  service_review_count = COALESCE((
+    SELECT COUNT(*)
+    FROM service_reviews
+    WHERE provider_id = st.student_id 
+    AND parent_id IS NULL
+  ), 0)
+WHERE is_active_service_provider = TRUE;
+
+-- ============================================
+-- PART 8: ADD HELPFUL COMMENTS
+-- ============================================
+
+COMMENT ON TRIGGER trigger_update_service_rating ON service_reviews IS 
+'Automatically updates service rating and review_count when reviews are added, updated, or deleted';
+
+COMMENT ON TRIGGER trigger_update_provider_rating ON service_reviews IS 
+'Automatically updates provider service_provider_rating and service_review_count when reviews are added, updated, or deleted';
+
+COMMENT ON CONSTRAINT service_reviews_rating_check ON service_reviews IS 
+'Top-level reviews must have rating 1-5, nested replies should have NULL rating';
+
+-- ============================================
+-- MIGRATION COMPLETE
+-- ============================================
