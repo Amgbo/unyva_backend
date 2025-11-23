@@ -76,6 +76,10 @@ const __dirname = dirname(__filename);
 // (express.raw) can access the original request bytes for signature verification.
 app.use('/api/payments', paymentRoutes);
 
+// Register web payment page routes at subpath to avoid routing conflicts
+import webPaymentPageRoutes from './controllers/webPaymentPage.js';
+app.use('/api/payments/external', webPaymentPageRoutes);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -135,7 +139,7 @@ app.use((err: any, req: Request, res: Response, _next: any) => {
     console.log('✅ Database initialization completed');
 
     // Start server
-    const server = app.listen(PORT, HOST, () => {
+    server = app.listen(PORT, HOST, () => {
       console.log(`✅ Server running at http://${HOST}:${PORT}`);
       console.log(`✅ Server also accessible at http://localhost:${PORT}`);
       console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
@@ -181,5 +185,3 @@ console.log('DB_PORT:', process.env.DB_PORT);
 console.log('DB_NAME:', process.env.DB_NAME);
 console.log('DB_USER:', process.env.DB_USER);
 console.log('DATABASE_URL exists:', !!process.env.DATABASE_URL);
-
-

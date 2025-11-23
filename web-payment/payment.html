@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Unyva Subscription Payment</title>
+<script src="https://js.paystack.co/v2/inline.js"></script>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    padding: 20px;
+    max-width: 480px;
+    margin: auto;
+  }
+  #payButton {
+    background-color: #007bff;
+    color: white;
+    padding: 14px 28px;
+    font-size: 18px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  #message {
+    margin-top: 16px;
+    font-size: 16px;
+    color: green;
+  }
+  #error {
+    margin-top: 16px;
+    font-size: 16px;
+    color: red;
+  }
+</style>
+</head>
+<body>
+<h1>Subscribe to Unyva Monthly</h1>
+<p>Pay GH₵5.00 per month for premium access.</p>
+<button id="payButton">Pay with Paystack</button>
+<div id="message"></div>
+<div id="error"></div>
+
+<script>
+  const payButton = document.getElementById('payButton');
+  const messageEl = document.getElementById('message');
+  const errorEl = document.getElementById('error');
+
+  // Extract query params: email and student_id (should be passed via url or backend template)
+  const urlParams = new URLSearchParams(window.location.search);
+  const email = urlParams.get('email');
+  const student_id = urlParams.get('student_id');
+
+  if (!email || !student_id) {
+    payButton.disabled = true;
+    errorEl.textContent = 'Missing user email or student ID. Cannot proceed with payment.';
+  }
+
+  payButton.addEventListener('click', () => {
+    errorEl.textContent = '';
+    messageEl.textContent = '';
+
+    const handler = PaystackPop.setup({
+      key: 'pk_live_ae308199ec9885d0fa1501fe2c293a0695704298', // Replace with your public key
+      email: email,
+      amount: 500, // Amount in kobo/pesewas (GH₵5.00 = 500 pesewas)
+      currency: 'GHS',
+      metadata: {
+        custom_fields: [
+          {
+            display_name: "Student ID",
+            variable_name: "student_id",
+            value: student_id,
+          },
+        ],
+        student_id: student_id,
+      },
+      callback: function(response) {
+        // Verify payment at backend
+        fetch('/api/payments/verify-payment', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            reference: response.reference,
+            student_id: student_id
+          }),
+        })
+        .then(res => res.json())
+        .then(data => {
+          if (data.success) {
+            messageEl.textContent = 'Payment verified successfully! Redirecting...';
+            // Redirect to deep link on iOS to unlock premium features
+            setTimeout(() => {
+              window.location.href = 'unyva://subscription-success';
+            }, 1500);
+          } else {
+            errorEl.textContent = 'Payment verification failed: ' + (data.message || 'Unknown error');
+          }
+        })
+        .catch(err => {
+          errorEl.textContent = 'Error verifying payment: ' + err.message;
+        });
+      },
+      onClose: function() {
+        errorEl.textContent = 'Payment popup closed.';
+      },
+    });
+    handler.openIframe();
+  });
+</script>
+</body>
+</html>
