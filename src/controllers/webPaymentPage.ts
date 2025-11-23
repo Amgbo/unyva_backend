@@ -6,17 +6,20 @@ const router = express.Router();
 
 // Serve the static HTML payment page
 router.get('/payment-page', (req: Request, res: Response, next: NextFunction): void => {
-  res.sendFile(path.resolve(__dirname, '../../web-payment/payment.html'), (err) => {
+  const filePath = path.resolve(__dirname, '../../web-payment/payment.html');
+  res.sendFile(filePath, (err: Error) => {
     if (err) {
       next(err);
     }
+    // nothing is returned here, just void
   });
 });
 
 // Endpoint to verify payment after checkout
 router.post('/verify-payment', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { reference, student_id } = req.body;
+    // Explicitly type req.body
+    const { reference, student_id } = req.body as { reference?: string; student_id?: string };
 
     if (!reference || !student_id) {
       res.status(400).json({ error: 'Missing payment reference or student ID' });
@@ -31,9 +34,9 @@ router.post('/verify-payment', async (req: Request, res: Response, next: NextFun
       return;
     }
 
-    const verifyResponse = await axios.get(\`https://api.paystack.co/transaction/verify/\${reference}\`, {
+    const verifyResponse = await axios.get(`https://api.paystack.co/transaction/verify/${reference}`, {
       headers: {
-        Authorization: \`Bearer \${PAYSTACK_SECRET_KEY}\`,
+        Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
         'Content-Type': 'application/json',
       },
     });
@@ -41,7 +44,7 @@ router.post('/verify-payment', async (req: Request, res: Response, next: NextFun
     const { data } = verifyResponse.data;
 
     if (data.status === 'success' && data.metadata?.student_id === student_id) {
-      // Consider payment successful, you might insert DB updates here or notify app via webhook
+      // Payment successful
       res.json({ success: true, message: 'Payment verified successfully' });
     } else {
       res.status(400).json({ success: false, message: 'Payment verification failed', transaction: data });
