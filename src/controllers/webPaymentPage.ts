@@ -1,8 +1,13 @@
 import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
 import axios from 'axios';
 
 const router = express.Router();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // Serve the static HTML payment page
 router.get('/payment-page', (req: Request, res: Response, next: NextFunction): void => {
