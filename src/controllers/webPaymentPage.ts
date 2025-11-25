@@ -9,14 +9,16 @@ const router = express.Router();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Serve the static HTML payment page
-router.get('/Subscribe to Unyva Monthly Pay GH₵5.00 per month for premium access. Pay with Paystack Missing user email or student ID. Cannot proceed with payment.', (req: Request, res: Response, next: NextFunction): void => {
+/**
+ * Serve the static HTML payment page
+ * Correct route to serve on `/api/payments/external/payment-page`
+ */
+router.get('/external/payment-page', (req: Request, res: Response, next: NextFunction): void => {
   const filePath = path.resolve(__dirname, '../../web-payment/payment.html');
   res.sendFile(filePath, (err: Error) => {
     if (err) {
       next(err);
     }
-    // nothing is returned here, just void
   });
 });
 
