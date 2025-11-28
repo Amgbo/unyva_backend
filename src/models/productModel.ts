@@ -855,11 +855,11 @@ export const getSearchFilters = async () => {
 
       SELECT
         'halls' as filter_type,
-        array_agg(DISTINCT h.id)::text[] as values,
+        json_agg(DISTINCT json_build_object('id', h.id, 'name', h.full_name)) as values,
         count(DISTINCT h.id) as count
       FROM products p
       JOIN university_halls h ON p.hall_id = h.id
-        WHERE p.status IN ('available', 'sold', 'pending') AND p.is_approved = true
+      WHERE p.status IN ('available', 'sold', 'pending') AND p.is_approved = true
 
       UNION ALL
 
