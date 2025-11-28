@@ -34,6 +34,7 @@ export const getCart = async (req: AuthRequest, res: Response): Promise<void> =>
       price: item.price,
       image: item.images && item.images.length > 0 ? item.images[0].image_url : '',
       quantity: item.quantity,
+      available_quantity: item.product_quantity, // Add available stock quantity
       product: {
         id: item.product_id,
         title: item.title,
@@ -105,6 +106,15 @@ export const addItemToCart = async (req: AuthRequest, res: Response): Promise<vo
       res.status(400).json({
         success: false,
         error: 'Product is not available for purchase'
+      });
+      return;
+    }
+
+    // Check if requested quantity is available
+    if (product.quantity !== undefined && product.quantity !== null && quantity > product.quantity) {
+      res.status(400).json({
+        success: false,
+        error: `Only ${product.quantity} units available. Cannot add ${quantity} units to cart.`
       });
       return;
     }
@@ -326,6 +336,12 @@ export const checkoutCart = async (req: AuthRequest, res: Response): Promise<voi
         const product = productResult.rows[0];
         const seller_id = product.seller_id;
         const unit_price = product.price;
+
+        // Check if quantity is still available before checkout
+        if (product.quantity !== undefined && product.quantity !== null && item.quantity > product.quantity) {
+          throw new Error(`Product ${product.title} only has ${product.quantity} units available. Cannot checkout ${item.quantity} units.`);
+        }
+
         const total_price = (unit_price * item.quantity) + (delivery_fee || 0);
 
         // Generate unique order number

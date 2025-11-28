@@ -12,6 +12,7 @@ export interface CartItem {
   seller_student_id: string;
   first_name: string;
   last_name: string;
+  product_quantity: number; // Available stock quantity
 }
 
 // Get all cart items for a student
@@ -77,6 +78,7 @@ export async function addToCart(studentId: string, productId: number, quantity: 
           p.id as product_id,
           p.title,
           p.price,
+          p.quantity as product_quantity,
           p.student_id as seller_student_id,
           s.first_name,
           s.last_name,
@@ -91,7 +93,7 @@ export async function addToCart(studentId: string, productId: number, quantity: 
         JOIN students s ON p.student_id = s.student_id
         LEFT JOIN product_images pi ON p.id = pi.product_id AND pi.is_primary = true
         WHERE c.id = $1
-        GROUP BY c.id, p.id, p.title, p.price, p.student_id, s.first_name, s.last_name, c.added_at
+        GROUP BY c.id, p.id, p.title, p.price, p.quantity, p.student_id, s.first_name, s.last_name, c.added_at
       `;
       const fullResult = await pool.query(fullItemQuery, [cartItem.id]);
       return fullResult.rows[0];
@@ -112,6 +114,7 @@ export async function addToCart(studentId: string, productId: number, quantity: 
           p.id as product_id,
           p.title,
           p.price,
+          p.quantity as product_quantity,
           p.student_id as seller_student_id,
           s.first_name,
           s.last_name,
@@ -126,7 +129,7 @@ export async function addToCart(studentId: string, productId: number, quantity: 
         JOIN students s ON p.student_id = s.student_id
         LEFT JOIN product_images pi ON p.id = pi.product_id AND pi.is_primary = true
         WHERE c.id = $1
-        GROUP BY c.id, p.id, p.title, p.price, p.student_id, s.first_name, s.last_name, c.added_at
+        GROUP BY c.id, p.id, p.title, p.price, p.quantity, p.student_id, s.first_name, s.last_name, c.added_at
       `;
       const fullResult = await pool.query(fullItemQuery, [cartItem.id]);
       return fullResult.rows[0];
@@ -164,6 +167,7 @@ export async function updateCartItemQuantity(cartItemId: number, quantity: numbe
         p.id as product_id,
         p.title,
         p.price,
+        p.quantity as product_quantity,
         p.student_id as seller_student_id,
         s.first_name,
         s.last_name,
@@ -178,7 +182,7 @@ export async function updateCartItemQuantity(cartItemId: number, quantity: numbe
       JOIN students s ON p.student_id = s.student_id
       LEFT JOIN product_images pi ON p.id = pi.product_id AND pi.is_primary = true
       WHERE c.id = $1
-      GROUP BY c.id, p.id, p.title, p.price, p.student_id, s.first_name, s.last_name, c.added_at
+      GROUP BY c.id, p.id, p.title, p.price, p.quantity, p.student_id, s.first_name, s.last_name, c.added_at
     `;
     const fullResult = await pool.query(fullItemQuery, [cartItem.id]);
     return fullResult.rows[0] || null;
