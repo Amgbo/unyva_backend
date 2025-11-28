@@ -27,12 +27,11 @@ router.get('/', async (req: Request, res: Response) => {
     }));
 
     // If no announcements with images, fall back to dummy banners
-    // If no announcements with images, fall back to dummy banners
 if (banners.length === 0) {
   banners.push(
     { 
       id: 'dummy-1', 
-      img: 'https://images.unsplash.com/photo-1427504494785-3a9ca7044f45?w=800&h=300&fit=crop&q=80', 
+      img: 'https://res.cloudinary.com/dfdaymnrv/image/upload/v1764345683/unyva-ico_zwjkyn.jpg', 
       title: 'Welcome to Unyva', 
       content: 'Your campus marketplace for buying and selling student essentials', 
       created_at: new Date().toISOString(),
@@ -40,7 +39,7 @@ if (banners.length === 0) {
     } as any,
     { 
       id: 'dummy-2', 
-      img: 'https://images.unsplash.com/photo-1509062522246-3755977927d7?w=800&h=300&fit=crop&q=80', 
+      img: 'https://res.cloudinary.com/dfdaymnrv/image/upload/v1764345646/student_items_yg6wtp.jpg', 
       title: 'Student Essentials', 
       content: 'Find textbooks, electronics, furniture, and more from fellow students', 
       created_at: new Date().toISOString(),
@@ -48,7 +47,7 @@ if (banners.length === 0) {
     }as any,
     { 
       id: 'dummy-3', 
-      img: 'https://images.unsplash.com/photo-1488190211105-8b0e65b80b4e?w=800&h=300&fit=crop&q=80', 
+      img: 'https://res.cloudinary.com/dfdaymnrv/image/upload/v1764345980/man-money-4972188_j97cfc.webp', 
       title: 'Shop Smart', 
       content: 'Save money by buying directly from students on campus', 
       created_at: new Date().toISOString(),
