@@ -705,6 +705,24 @@ BEFORE UPDATE ON deliveries
 FOR EACH ROW
 EXECUTE FUNCTION update_deliveries_updated_at();
 
+-- Function to automatically update order status when delivery is completed
+CREATE OR REPLACE FUNCTION update_order_status_on_delivery_completion()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Only update when status changes to 'completed'
+    IF NEW.status = 'completed' AND OLD.status != 'completed' THEN
+        UPDATE orders SET status = 'delivered' WHERE id = NEW.order_id;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE 'plpgsql';
+
+-- Trigger to update order status when delivery is completed
+CREATE TRIGGER trigger_update_order_status_on_delivery_completion
+AFTER UPDATE ON deliveries
+FOR EACH ROW
+EXECUTE FUNCTION update_order_status_on_delivery_completion();
+
 -- Insert sample order and delivery for testing
 INSERT INTO orders (order_number, customer_id, seller_id, product_id, quantity, unit_price, total_price, delivery_option, delivery_fee, status, delivery_hall_id, delivery_room_number)
 SELECT

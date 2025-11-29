@@ -1030,7 +1030,7 @@ export const getSellerProductsGrouped = async (student_id: string): Promise<Sell
       FROM products p
       LEFT JOIN university_halls h ON p.hall_id = h.id
       LEFT JOIN product_images pi ON p.id = pi.product_id
-      LEFT JOIN orders o ON p.id = o.product_id AND o.status = 'confirmed' AND o.seller_id = p.student_id
+      LEFT JOIN orders o ON p.id = o.product_id AND o.status IN ('confirmed', 'pending') AND o.seller_id = p.student_id
       LEFT JOIN students s ON o.customer_id = s.student_id
       WHERE p.student_id = $1 AND p.status = 'pending'
       GROUP BY p.id, h.full_name, o.id, o.customer_id, o.delivery_option, o.special_instructions, o.created_at, s.first_name, s.last_name, s.phone, s.email

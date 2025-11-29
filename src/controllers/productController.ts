@@ -557,6 +557,14 @@ export const confirmDelivered = async (req: AuthRequest, res: Response): Promise
       `;
       await client.query(updateOrderQuery, [productId, studentId]);
 
+      // Set product status back to 'available' so it can be purchased again
+      const updateProductStatusQuery = `
+        UPDATE products
+        SET status = 'available', updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1 AND student_id = $2
+      `;
+      await client.query(updateProductStatusQuery, [productId, studentId]);
+
       await client.query('COMMIT');
 
       res.status(200).json({
