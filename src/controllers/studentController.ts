@@ -215,31 +215,51 @@ export const completeRegistration = async (req: Request, res: Response): Promise
 
   try {
     console.log('🔐 Hashing password for student:', student_id);
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(password, 8); // Reduced from 10 to 8 for faster registration
 
-    // Upload profile picture and ID card to ImageKit if provided
+    // Upload profile picture and ID card to ImageKit asynchronously (fire-and-forget)
     let profilePictureUrl = null;
     let idCardUrl = null;
 
+    // Start uploads asynchronously without waiting
+    const uploadPromises = [];
+
     if (profilePicFile) {
-      const profileResult = await imagekit.upload({
+      const profileUploadPromise = imagekit.upload({
         file: profilePicFile.buffer,
         fileName: `${student_id}-profile-${Date.now()}.jpg`,
         folder: "/unyva_profiles",
+      }).then(result => {
+        profilePictureUrl = result.url;
+        console.log('📸 Profile picture uploaded to ImageKit:', profilePictureUrl);
+        // Update database with profile picture URL asynchronously
+        return pool.query('UPDATE students SET profile_picture = $1 WHERE student_id = $2', [result.url, student_id]);
+      }).catch(error => {
+        console.error('⚠️ Profile picture upload failed:', error.message);
       });
-      profilePictureUrl = profileResult.url;
-      console.log('📸 Profile picture uploaded to ImageKit:', profilePictureUrl);
+      uploadPromises.push(profileUploadPromise);
     }
 
     if (idCardFile) {
-      const idCardResult = await imagekit.upload({
+      const idCardUploadPromise = imagekit.upload({
         file: idCardFile.buffer,
         fileName: `${student_id}-idcard-${Date.now()}.jpg`,
         folder: "/unyva_idcards",
+      }).then(result => {
+        idCardUrl = result.url;
+        console.log('🆔 ID card uploaded to ImageKit:', idCardUrl);
+        // Update database with ID card URL asynchronously
+        return pool.query('UPDATE students SET id_card = $1 WHERE student_id = $2', [result.url, student_id]);
+      }).catch(error => {
+        console.error('⚠️ ID card upload failed:', error.message);
       });
-      idCardUrl = idCardResult.url;
-      console.log('🆔 ID card uploaded to ImageKit:', idCardUrl);
+      uploadPromises.push(idCardUploadPromise);
     }
+
+    // Don't wait for uploads to complete - they will finish asynchronously
+    Promise.allSettled(uploadPromises).then(results => {
+      console.log('📤 Image upload results:', results.map(r => r.status));
+    });
 
     // Convert date from "DD-MM-YYYY" to "YYYY-MM-DD" for PostgreSQL
     const [day, month, year] = date_of_birth.split('-');
@@ -292,23 +312,21 @@ export const completeRegistration = async (req: Request, res: Response): Promise
       console.log('✅ Delivery code marked as used:', delivery_code);
     }
 
-    // Try to send verification email, but don't fail if it doesn't work
+    // Send verification email asynchronously (fire-and-forget)
     if (transporter) {
-      try {
-        const verifyLink = `${process.env.BASE_URL}/api/students/verify-email?token=${verificationToken}`;
-        await transporter.sendMail({
-          from: `"Unyva UG" <${process.env.EMAIL_USER}>`,
-          to: email,
-          subject: 'Verify your Unyva account',
-          html: `<p>Hello ${first_name},</p>
-                 <p>Please click the link below to verify your email:</p>
-                 <a href="${verifyLink}">${verifyLink}</a>`,
-        });
+      const verifyLink = `${process.env.BASE_URL}/api/students/verify-email?token=${verificationToken}`;
+      transporter.sendMail({
+        from: `"Unyva UG" <${process.env.EMAIL_USER}>`,
+        to: email,
+        subject: 'Verify your Unyva account',
+        html: `<p>Hello ${first_name},</p>
+               <p>Please click the link below to verify your email:</p>
+               <a href="${verifyLink}">${verifyLink}</a>`,
+      }).then(() => {
         console.log('📧 Verification email sent to:', email);
-      } catch (emailError: any) {
+      }).catch((emailError: any) => {
         console.log('⚠️ Email sending failed, but registration continues:', emailError?.message || 'Unknown error');
-        // Continue with registration even if email fails
-      }
+      });
     } else {
       console.log('⚠️ Email transporter not available, skipping email verification');
     }
