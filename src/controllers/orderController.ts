@@ -103,12 +103,12 @@ export const createOrder = async (req: Request, res: Response): Promise<void> =>
       `;
       await client.query(updateQuantityQuery, [quantity, product_id]);
 
-      // For delivery orders, set status to 'pending' for delivery coordination
-      // For pickup orders, keep product as 'available' but with reduced quantity
+      // For delivery orders, set product status to 'reserved' (committed but awaiting delivery)
+      // For pickup orders, keep product as 'available' with reduced quantity
       if (delivery_option === 'delivery') {
         const updateProductStatusQuery = `
           UPDATE products
-          SET status = 'pending', updated_at = CURRENT_TIMESTAMP
+          SET status = 'reserved', updated_at = CURRENT_TIMESTAMP
           WHERE id = $1
         `;
         await client.query(updateProductStatusQuery, [product_id]);
@@ -137,11 +137,30 @@ export const createOrder = async (req: Request, res: Response): Promise<void> =>
         // Delivery will remain pending for manual acceptance by delivery persons
       }
 
-      // Clear cart item if it exists (only for single item orders, not bulk cart checkout)
-      await client.query(
-        'DELETE FROM cart WHERE student_id = $1 AND product_id = $2',
-        [customer_id, product_id]
-      );
+      // Clear cart item if it exists (remove the specific quantity ordered from cart)
+      // First check if there's a cart item for this product
+      const cartCheckQuery = `
+        SELECT id, quantity FROM cart
+        WHERE student_id = $1 AND product_id = $2
+      `;
+      const cartCheckResult = await client.query(cartCheckQuery, [customer_id, product_id]);
+
+      if (cartCheckResult.rows.length > 0) {
+        const cartItem = cartCheckResult.rows[0];
+        if (cartItem.quantity <= quantity) {
+          // Remove entire cart item if cart quantity is less than or equal to ordered quantity
+          await client.query(
+            'DELETE FROM cart WHERE id = $1',
+            [cartItem.id]
+          );
+        } else {
+          // Reduce cart quantity by ordered amount
+          await client.query(
+            'UPDATE cart SET quantity = quantity - $1 WHERE id = $2',
+            [quantity, cartItem.id]
+          );
+        }
+      }
 
       await client.query('COMMIT');
 
@@ -322,10 +341,10 @@ export const updateOrderStatus = async (req: Request, res: Response): Promise<vo
     const { id } = req.params;
     const { status } = req.body;
 
-    if (!status || !['pending', 'confirmed', 'shipped', 'delivered', 'cancelled'].includes(status)) {
+    if (!status || !['pending', 'confirmed', 'assigned', 'in_progress', 'delivered', 'cancelled'].includes(status)) {
       res.status(400).json({
         success: false,
-        message: 'Invalid status. Must be one of: pending, confirmed, shipped, delivered, cancelled'
+        message: 'Invalid status. Must be one of: pending, confirmed, assigned, in_progress, delivered, cancelled'
       });
       return;
     }

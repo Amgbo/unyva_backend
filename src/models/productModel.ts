@@ -375,11 +375,16 @@ export const updateProduct = async (id: number, updateData: UpdateProductData): 
   }
 };
 
-// Archive product (with ownership check) - sets status to 'archived'
+// Delete product permanently (with ownership check) - removes from database
 export const deleteProduct = async (id: number, studentId: string): Promise<boolean> => {
   try {
-    const query = 'UPDATE products SET status = \'archived\', updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND student_id = $2 RETURNING id';
-    const result = await pool.query(query, [id, studentId]);
+    // First delete associated product images
+    const deleteImagesQuery = 'DELETE FROM product_images WHERE product_id = $1';
+    await pool.query(deleteImagesQuery, [id]);
+
+    // Then delete the product itself
+    const deleteProductQuery = 'DELETE FROM products WHERE id = $1 AND student_id = $2 RETURNING id';
+    const result = await pool.query(deleteProductQuery, [id, studentId]);
 
     return result.rows.length > 0;
   } catch (error) {

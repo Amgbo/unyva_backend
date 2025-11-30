@@ -389,7 +389,8 @@ export const checkoutCart = async (req: AuthRequest, res: Response): Promise<voi
           deliveryRequests.push(deliveryResult.rows[0]);
         }
 
-        // Keep product status as 'available' so it remains purchasable by other users
+        // Keep product status as 'available' for both pickup and delivery orders so it remains purchasable by other users
+        // Product availability is managed through quantity, not status
         // Product sales are tracked through the orders table, not product status
       }
 

@@ -625,7 +625,7 @@ CREATE TABLE IF NOT EXISTS orders (
     ),
     delivery_fee DECIMAL(10, 2) DEFAULT 0,
     status VARCHAR(20) DEFAULT 'pending' CHECK (
-        status IN ('pending', 'confirmed', 'delivered', 'cancelled')
+        status IN ('pending', 'confirmed', 'assigned', 'in_progress', 'delivered', 'cancelled')
     ),
     payment_status VARCHAR(20) DEFAULT 'pending' CHECK (
         payment_status IN ('pending', 'paid', 'failed', 'refunded')

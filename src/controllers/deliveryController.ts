@@ -161,7 +161,7 @@ export const acceptDelivery = async (req: AuthRequest, res: Response): Promise<v
     // Attempt to assign delivery to delivery person if not already assigned
     const assignResult = await pool.query(
       `UPDATE deliveries
-       SET delivery_person_id = $1, status = 'assigned'
+       SET delivery_person_id = $1, status = 'assigned', assigned_at = NOW()
        WHERE id = $2 AND (delivery_person_id IS NULL OR delivery_person_id = $1) AND status = 'pending'`,
       [studentId, deliveryId]
     );
@@ -170,6 +170,14 @@ export const acceptDelivery = async (req: AuthRequest, res: Response): Promise<v
       res.status(404).json({ error: 'Delivery not found, already assigned, or not available for acceptance' });
       return;
     }
+
+    // Update order status to 'assigned' when delivery is assigned
+    await pool.query(
+      `UPDATE orders
+       SET status = 'assigned', updated_at = NOW()
+       WHERE id = (SELECT order_id FROM deliveries WHERE id = $1)`,
+      [deliveryId]
+    );
 
     // Start the delivery (change status from assigned to in_progress)
     const startResult = await pool.query(
@@ -183,6 +191,14 @@ export const acceptDelivery = async (req: AuthRequest, res: Response): Promise<v
       res.status(500).json({ error: 'Failed to start delivery after assignment' });
       return;
     }
+
+    // Update order status to 'in_progress' when delivery starts
+    await pool.query(
+      `UPDATE orders
+       SET status = 'in_progress', updated_at = NOW()
+       WHERE id = (SELECT order_id FROM deliveries WHERE id = $1)`,
+      [deliveryId]
+    );
 
     res.json({ success: true, message: 'Delivery accepted and started successfully' });
   } catch (error) {
@@ -204,6 +220,12 @@ export const completeDelivery = async (req: AuthRequest, res: Response): Promise
 
     if (isNaN(deliveryId)) {
       res.status(400).json({ error: 'Invalid delivery ID' });
+      return;
+    }
+
+    // Validate rating range (1-5) if provided
+    if (rating !== undefined && (rating < 1 || rating > 5)) {
+      res.status(400).json({ error: 'Rating must be between 1 and 5' });
       return;
     }
 
@@ -233,8 +255,13 @@ export const completeDelivery = async (req: AuthRequest, res: Response): Promise
       return;
     }
 
-    // Note: Product status remains 'available' as per new requirement
-    // Order status will be auto-updated by database trigger when delivery status changes to 'completed'
+    // Update order status to 'delivered' and payment_status to 'paid' when delivery is completed
+    await pool.query(
+      `UPDATE orders
+       SET status = 'delivered', payment_status = 'paid', updated_at = NOW()
+       WHERE id = (SELECT order_id FROM deliveries WHERE id = $1)`,
+      [deliveryId]
+    );
 
     // Update delivery person's rating if rating provided
     if (rating !== undefined) {
