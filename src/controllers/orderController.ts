@@ -42,12 +42,29 @@ export const createOrder = async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
+    // Check if delivery person has active deliveries (prevent ordering while working)
+    if ((req as any).user?.role === 'delivery') {
+      const activeDeliveries = await pool.query(
+        `SELECT COUNT(*) FROM deliveries
+         WHERE delivery_person_id = $1 AND status IN ('assigned', 'in_progress')`,
+        [customer_id]
+      );
+
+      if (parseInt(activeDeliveries.rows[0].count) > 0) {
+        res.status(400).json({
+          success: false,
+          message: 'Cannot place orders while you have active deliveries. Please complete your current deliveries first.'
+        });
+        return;
+      }
+    }
+
     // Get product details and validate quantity availability
     const productQuery = `
       SELECT p.*, s.student_id as seller_id, p.hall_id as seller_hall_id, p.room_number as seller_room_number
       FROM products p
       JOIN students s ON p.student_id = s.student_id
-      WHERE p.id = $1 AND p.status = 'available' AND p.quantity >= $2
+      WHERE p.id = $1 AND p.status IN ('available', 'reserved') AND p.quantity >= $2
     `;
     const productResult = await pool.query(productQuery, [product_id, quantity]);
 
@@ -86,8 +103,8 @@ export const createOrder = async (req: Request, res: Response): Promise<void> =>
       const orderValues = [
         orderNumber, customer_id, seller_id, product_id, quantity,
         unit_price, total_price, delivery_option, delivery_fee || 0,
-        delivery_option === 'delivery' ? 'pending' : 'confirmed', // Set status to pending if delivery
-        delivery_option === 'delivery' ? 'pending' : 'paid', // Set payment_status to pending if delivery
+        'confirmed', // Always set status to confirmed for both delivery and pickup
+        delivery_option === 'delivery' ? 'pending' : 'paid', // Set payment_status to pending if delivery, paid if pickup
         delivery_hall_id, delivery_room_number,
         special_instructions
       ];
@@ -103,17 +120,8 @@ export const createOrder = async (req: Request, res: Response): Promise<void> =>
       `;
       await client.query(updateQuantityQuery, [quantity, product_id]);
 
-      // For delivery orders, set product status to 'reserved' (committed but awaiting delivery)
-      // For pickup orders, keep product as 'available' with reduced quantity
-      if (delivery_option === 'delivery') {
-        const updateProductStatusQuery = `
-          UPDATE products
-          SET status = 'reserved', updated_at = CURRENT_TIMESTAMP
-          WHERE id = $1
-        `;
-        await client.query(updateProductStatusQuery, [product_id]);
-      }
-      // For pickup orders, keep product as 'available' with reduced quantity
+      // Keep product as 'available' for both delivery and pickup orders
+      // This allows multiple purchases even when items are on delivery
 
       // Create delivery request if delivery is selected
       if (delivery_option === 'delivery') {
