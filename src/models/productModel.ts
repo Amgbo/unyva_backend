@@ -444,7 +444,7 @@ export const searchProducts = async (searchParams: {
       LEFT JOIN university_halls h ON p.hall_id = h.id
       LEFT JOIN students s ON p.student_id = s.student_id
       LEFT JOIN product_images pi ON p.id = pi.product_id
-      WHERE p.status IN ('available', 'sold', 'pending') AND p.is_approved = true
+      WHERE p.status IN ('available', 'sold', 'pending') AND p.is_approved = true AND p.quantity > 0
     `;
 
     const values: any[] = [searchParams.query];
@@ -657,7 +657,7 @@ export const getRecentProducts = async (limit: number = 20, excludeStudentId?: s
       LEFT JOIN university_halls h ON p.hall_id = h.id
       LEFT JOIN students s ON p.student_id = s.student_id
       LEFT JOIN product_images pi ON p.id = pi.product_id
-      WHERE p.status IN ('available', 'sold', 'pending') AND p.is_approved = true
+      WHERE p.status IN ('available', 'sold', 'pending') AND p.is_approved = true AND p.quantity > 0
         AND p.created_at >= NOW() - INTERVAL '48 hours'
     `;
 
@@ -724,7 +724,7 @@ export const getProductsByCategory = async (
       LEFT JOIN university_halls h ON p.hall_id = h.id
       LEFT JOIN students s ON p.student_id = s.student_id
       LEFT JOIN product_images pi ON p.id = pi.product_id
-      WHERE p.status IN ('available', 'sold', 'pending') AND p.is_approved = true AND p.category = $1
+      WHERE p.status IN ('available', 'sold', 'pending') AND p.is_approved = true AND p.quantity > 0 AND p.category = $1
     `;
 
     const values: any[] = [category];
@@ -802,7 +802,7 @@ export const getRelatedProducts = async (
       LEFT JOIN university_halls h ON p.hall_id = h.id
       LEFT JOIN students s ON p.student_id = s.student_id
       LEFT JOIN product_images pi ON p.id = pi.product_id
-        WHERE p.status IN ('available', 'sold', 'pending') AND p.is_approved = true AND p.id != $1 AND p.category = $2
+        WHERE p.status IN ('available', 'sold', 'pending') AND p.is_approved = true AND p.quantity > 0 AND p.id != $1 AND p.category = $2
     `;
 
     const values: any[] = [productId, category];
@@ -944,6 +944,7 @@ export const getProductSuggestions = async (
       LEFT JOIN product_images pi ON p.id = pi.product_id
         WHERE p.status IN ('available', 'sold', 'pending')
         AND p.is_approved = true
+        AND p.quantity > 0
         AND p.student_id != $1
       GROUP BY p.id, h.full_name, s.first_name, s.last_name
       ORDER BY
