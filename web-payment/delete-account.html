@@ -175,5 +175,40 @@
             </div>
         </div>
     </div>
+
+    <script>
+        document.getElementById('deleteForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const formData = new FormData(this);
+            const data = {
+                fullName: formData.get('Full Name'),
+                studentId: formData.get('Student ID or Email'),
+                deletionMessage: formData.get('Deletion Request Message')
+            };
+
+            try {
+                const response = await fetch('/api/delete-account', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    alert('Your account deletion request has been submitted successfully. An admin will review it shortly.');
+                    this.reset();
+                } else {
+                    alert('Error: ' + (result.error || 'Failed to submit request'));
+                }
+            } catch (error) {
+                console.error('Error submitting form:', error);
+                alert('An error occurred while submitting your request. Please try again.');
+            }
+        });
+    </script>
 </body>
 </html>

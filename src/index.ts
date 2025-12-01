@@ -24,6 +24,7 @@ import reviewRoutes from './routes/reviewRoutes.js';
 import { announcementRouter as announcementRoutes } from './routes/announcementRoutes.js';
 import paymentRoutes from './routes/paymentRoutes.js';
 import openProductRoutes from './routes/openProductRoutes.js';
+import { deleteAccountRouter } from './routes/deleteAccountRoutes.js';
 
 // Initialize app
 const app = express();
@@ -104,6 +105,7 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/announcements', announcementRoutes);
 app.use('/api', openProductRoutes);
+app.use('/api', deleteAccountRouter);
 
 console.log('✅ Admin routes registered at /api/admin');
 console.log('✅ Delivery routes registered at /api/deliveries');
@@ -115,6 +117,11 @@ console.log('✅ Open product routes registered at /api');
 // Root sanity check
 app.get('/', (_: Request, res: Response) => {
   res.send('🚀 Unyva backend is running!');
+});
+
+// Serve delete account HTML page
+app.get('/delete-account.html', (_: Request, res: Response) => {
+  res.sendFile(path.join(__dirname, '../web-payment/delete-account.html'));
 });
 
 // Test route
