@@ -1,4 +1,4 @@
-import bcrypt from 'bcrypt';
+ import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
@@ -720,6 +720,143 @@ export const updateStudentProfile = async (req: any, res: Response): Promise<voi
     });
     res.status(500).json({
       error: 'Failed to update profile',
+      message: err.message,
+      code: err.code,
+      detail: err.detail
+    });
+  }
+};
+
+// DELETE: Account deletion - COMPLETE DATA CLEANUP
+export const deleteAccount = async (req: any, res: Response): Promise<void> => {
+  try {
+    const { email, student_id } = req.body;
+
+    if (!email && !student_id) {
+      res.status(400).json({ error: 'Email or student_id is required in the request body' });
+      return;
+    }
+
+    console.log('🗑️ ACCOUNT DELETION REQUEST RECEIVED');
+    console.log('📧 Email:', email);
+    console.log('👤 Student ID:', student_id);
+
+    // Find the student by email or student_id
+    let studentQuery = 'SELECT * FROM students WHERE ';
+    let queryParams: any[] = [];
+    if (email && student_id) {
+      studentQuery += 'email = $1 OR student_id = $2';
+      queryParams = [email, student_id];
+    } else if (email) {
+      studentQuery += 'email = $1';
+      queryParams = [email];
+    } else {
+      studentQuery += 'student_id = $1';
+      queryParams = [student_id];
+    }
+
+    const studentResult = await pool.query(studentQuery, queryParams);
+    if (studentResult.rows.length === 0) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    const student = studentResult.rows[0];
+    const studentId = student.student_id;
+
+    console.log('👤 Found student:', studentId);
+
+    // Start transaction for complete data cleanup
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      // Delete images from ImageKit if they exist
+      if (student.profile_picture) {
+        try {
+          // Extract fileId from URL (assuming URL format: https://ik.imagekit.io/.../fileId)
+          const urlParts = student.profile_picture.split('/');
+          const fileId = urlParts[urlParts.length - 1];
+          await imagekit.deleteFile(fileId);
+          console.log('🗑️ Deleted profile picture from ImageKit:', fileId);
+        } catch (imageError) {
+          console.error('⚠️ Failed to delete profile picture:', imageError);
+        }
+      }
+
+      if (student.id_card) {
+        try {
+          const urlParts = student.id_card.split('/');
+          const fileId = urlParts[urlParts.length - 1];
+          await imagekit.deleteFile(fileId);
+          console.log('🗑️ Deleted ID card from ImageKit:', fileId);
+        } catch (imageError) {
+          console.error('⚠️ Failed to delete ID card:', imageError);
+        }
+      }
+
+      // 1. Delete all reviews by this student
+      console.log('🗑️ Deleting reviews...');
+      await client.query('DELETE FROM reviews WHERE student_id = $1', [studentId]);
+
+      // 2. Delete all products by this student
+      console.log('🗑️ Deleting products...');
+      await client.query('DELETE FROM products WHERE seller_id = $1', [studentId]);
+
+      // 3. Delete all services by this student
+      console.log('🗑️ Deleting services...');
+      await client.query('DELETE FROM services WHERE provider_id = $1', [studentId]);
+
+      // 4. Delete all cart items by this student
+      console.log('🗑️ Deleting cart items...');
+      await client.query('DELETE FROM cart WHERE student_id = $1', [studentId]);
+
+      // Note: Keeping transaction records (orders, payments, deliveries) for 6 months
+
+      // 5. Finally, delete the student record
+      console.log('🗑️ Deleting student record...');
+      const deleteResult = await client.query(
+        'DELETE FROM students WHERE student_id = $1 RETURNING student_id, email, first_name, last_name',
+        [studentId]
+      );
+
+      if (deleteResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        res.status(404).json({ error: 'Student not found' });
+        return;
+      }
+
+      await client.query('COMMIT');
+
+      console.log('✅ ACCOUNT DELETION COMPLETED SUCCESSFULLY');
+      console.log('👤 Deleted student:', deleteResult.rows[0]);
+
+      res.status(200).json({
+        message: 'Account deleted successfully. Personal data and listings have been removed. Transaction records are retained for 6 months.',
+        deleted_student: deleteResult.rows[0]
+      });
+
+    } catch (deleteError: any) {
+      await client.query('ROLLBACK');
+      console.error('❌ Account deletion transaction failed:', deleteError);
+      throw deleteError;
+    } finally {
+      client.release();
+    }
+
+  } catch (err: any) {
+    console.error('❌ Account Deletion Error:', err);
+    console.error('Error details:', {
+      message: err.message,
+      code: err.code,
+      detail: err.detail,
+      table: err.table,
+      constraint: err.constraint,
+      stack: err.stack
+    });
+    res.status(500).json({
+      error: 'Failed to delete account',
       message: err.message,
       code: err.code,
       detail: err.detail

@@ -8,6 +8,7 @@ import {
   getStudentProfile,
   getStudentProfileById,
   updateStudentProfile,
+  deleteAccount,
 } from '../controllers/studentController.js';
 import { authMiddleware } from '../middleware/authMiddleware.js';
 
@@ -51,5 +52,8 @@ router.get('/profile/:studentId', getStudentProfileById);
 
 // Update student profile (protected)
 router.put('/profile', authMiddleware, upload.any(), updateStudentProfile);
+
+// Delete account (protected)
+router.delete('/delete-account', authMiddleware, deleteAccount);
 
 export { router as studentRouter };
