@@ -844,47 +844,38 @@ export const getSearchFilters = async () => {
       // Categories
       pool.query(`
         SELECT
-          json_agg(json_build_object('value', category)) as values,
-          count(*) as count
-        FROM (
-          SELECT DISTINCT category
-          FROM products
-          WHERE status IN ('available', 'sold', 'pending') AND is_approved = true
-        ) distinct_categories
+          array_agg(DISTINCT category) as values,
+          count(DISTINCT category) as count
+        FROM products
+        WHERE status IN ('available', 'sold', 'pending') AND is_approved = true
       `),
 
       // Conditions
       pool.query(`
         SELECT
-          json_agg(json_build_object('value', condition)) as values,
-          count(*) as count
-        FROM (
-          SELECT DISTINCT condition
-          FROM products
-          WHERE status IN ('available', 'sold', 'pending') AND is_approved = true
-        ) distinct_conditions
+          array_agg(DISTINCT condition) as values,
+          count(DISTINCT condition) as count
+        FROM products
+        WHERE status IN ('available', 'sold', 'pending') AND is_approved = true
       `),
 
       // Halls
       pool.query(`
         SELECT
-          json_agg(json_build_object('id', id, 'name', full_name)) as values,
-          count(*) as count
-        FROM (
-          SELECT DISTINCT h.id, h.full_name
-          FROM products p
-          JOIN university_halls h ON p.hall_id = h.id
-          WHERE p.status IN ('available', 'sold', 'pending') AND p.is_approved = true
-        ) distinct_halls
+          array_agg(DISTINCT json_build_object('id', h.id, 'name', h.full_name)) as values,
+          count(DISTINCT h.id) as count
+        FROM products p
+        JOIN university_halls h ON p.hall_id = h.id
+        WHERE p.status IN ('available', 'sold', 'pending') AND p.is_approved = true
       `),
 
       // Price ranges
       pool.query(`
         SELECT
-          json_agg(json_build_object('value', price_range)) as values,
-          count(*) as count
+          array_agg(DISTINCT price_range) as values,
+          count(DISTINCT price_range) as count
         FROM (
-          SELECT DISTINCT
+          SELECT
             CASE
               WHEN price < 10 THEN 'Under $10'
               WHEN price < 25 THEN '$10 - $25'
@@ -895,17 +886,17 @@ export const getSearchFilters = async () => {
             END as price_range
           FROM products
           WHERE status IN ('available', 'sold', 'pending') AND is_approved = true AND price > 0
-        ) distinct_price_ranges
+        ) price_ranges
       `)
     ]);
 
     const filters: Record<string, any> = {
       categories: {
-        values: categoriesResult.rows[0]?.values || [],
+        values: (categoriesResult.rows[0]?.values || []).map((value: string) => ({ value })),
         count: parseInt(categoriesResult.rows[0]?.count || 0)
       },
       conditions: {
-        values: conditionsResult.rows[0]?.values || [],
+        values: (conditionsResult.rows[0]?.values || []).map((value: string) => ({ value })),
         count: parseInt(conditionsResult.rows[0]?.count || 0)
       },
       halls: {
@@ -913,7 +904,7 @@ export const getSearchFilters = async () => {
         count: parseInt(hallsResult.rows[0]?.count || 0)
       },
       price_ranges: {
-        values: priceRangesResult.rows[0]?.values || [],
+        values: (priceRangesResult.rows[0]?.values || []).map((value: string) => ({ value })),
         count: parseInt(priceRangesResult.rows[0]?.count || 0)
       }
     };
