@@ -839,70 +839,82 @@ export const getRelatedProducts = async (
 // Get search filters and aggregations
 export const getSearchFilters = async () => {
   try {
-    const query = `
-      SELECT
-        'categories' as filter_type,
-        json_agg(DISTINCT category) as values,
-        count(DISTINCT category) as count
-      FROM products
+    // Execute separate queries to avoid UNION ALL type compatibility issues
+    const [categoriesResult, conditionsResult, hallsResult, priceRangesResult] = await Promise.all([
+      // Categories
+      pool.query(`
+        SELECT
+          json_agg(DISTINCT json_build_object('value', category)) as values,
+          count(DISTINCT category) as count
+        FROM products
         WHERE status IN ('available', 'sold', 'pending') AND is_approved = true
+      `),
 
-      UNION ALL
-
-      SELECT
-        'conditions' as filter_type,
-        json_agg(DISTINCT condition) as values,
-        count(DISTINCT condition) as count
-      FROM products
+      // Conditions
+      pool.query(`
+        SELECT
+          json_agg(DISTINCT json_build_object('value', condition)) as values,
+          count(DISTINCT condition) as count
+        FROM products
         WHERE status IN ('available', 'sold', 'pending') AND is_approved = true
+      `),
 
-      UNION ALL
+      // Halls
+      pool.query(`
+        SELECT
+          json_agg(DISTINCT json_build_object('id', h.id, 'name', h.full_name)) as values,
+          count(DISTINCT h.id) as count
+        FROM products p
+        JOIN university_halls h ON p.hall_id = h.id
+        WHERE p.status IN ('available', 'sold', 'pending') AND p.is_approved = true
+      `),
 
-      SELECT
-        'halls' as filter_type,
-        json_agg(DISTINCT json_build_object('id', h.id, 'name', h.full_name)) as values,
-        count(DISTINCT h.id) as count
-      FROM products p
-      JOIN university_halls h ON p.hall_id = h.id
-      WHERE p.status IN ('available', 'sold', 'pending') AND p.is_approved = true
-
-      UNION ALL
-
-      SELECT
-        'price_ranges' as filter_type,
-        json_agg(DISTINCT
-          CASE
-            WHEN price < 10 THEN 'Under $10'
-            WHEN price < 25 THEN '$10 - $25'
-            WHEN price < 50 THEN '$25 - $50'
-            WHEN price < 100 THEN '$50 - $100'
-            WHEN price < 500 THEN '$100 - $500'
-            ELSE 'Over $500'
-          END
-        ) as values,
-        count(DISTINCT
-          CASE
-            WHEN price < 10 THEN 'Under $10'
-            WHEN price < 25 THEN '$10 - $25'
-            WHEN price < 50 THEN '$25 - $50'
-            WHEN price < 100 THEN '$50 - $100'
-            WHEN price < 500 THEN '$100 - $500'
-            ELSE 'Over $500'
-          END
-        ) as count
-      FROM products
+      // Price ranges
+      pool.query(`
+        SELECT
+          json_agg(DISTINCT json_build_object('value',
+            CASE
+              WHEN price < 10 THEN 'Under $10'
+              WHEN price < 25 THEN '$10 - $25'
+              WHEN price < 50 THEN '$25 - $50'
+              WHEN price < 100 THEN '$50 - $100'
+              WHEN price < 500 THEN '$100 - $500'
+              ELSE 'Over $500'
+            END
+          )) as values,
+          count(DISTINCT
+            CASE
+              WHEN price < 10 THEN 'Under $10'
+              WHEN price < 25 THEN '$10 - $25'
+              WHEN price < 50 THEN '$25 - $50'
+              WHEN price < 100 THEN '$50 - $100'
+              WHEN price < 500 THEN '$100 - $500'
+              ELSE 'Over $500'
+            END
+          ) as count
+        FROM products
         WHERE status IN ('available', 'sold', 'pending') AND is_approved = true AND price > 0
-    `;
+      `)
+    ]);
 
-    const result = await pool.query(query);
-    const filters: Record<string, any> = {};
-
-    result.rows.forEach(row => {
-      filters[row.filter_type] = {
-        values: row.values || [],
-        count: parseInt(row.count)
-      };
-    });
+    const filters: Record<string, any> = {
+      categories: {
+        values: categoriesResult.rows[0]?.values || [],
+        count: parseInt(categoriesResult.rows[0]?.count || 0)
+      },
+      conditions: {
+        values: conditionsResult.rows[0]?.values || [],
+        count: parseInt(conditionsResult.rows[0]?.count || 0)
+      },
+      halls: {
+        values: hallsResult.rows[0]?.values || [],
+        count: parseInt(hallsResult.rows[0]?.count || 0)
+      },
+      price_ranges: {
+        values: priceRangesResult.rows[0]?.values || [],
+        count: parseInt(priceRangesResult.rows[0]?.count || 0)
+      }
+    };
 
     return filters;
   } catch (error) {
