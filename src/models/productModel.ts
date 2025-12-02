@@ -862,11 +862,14 @@ export const getSearchFilters = async () => {
       // Halls
       pool.query(`
         SELECT
-          array_agg(DISTINCT json_build_object('id', h.id, 'name', h.full_name)) as values,
-          count(DISTINCT h.id) as count
-        FROM products p
-        JOIN university_halls h ON p.hall_id = h.id
-        WHERE p.status IN ('available', 'sold', 'pending') AND p.is_approved = true
+          array_agg(json_build_object('id', h.id, 'name', h.full_name)) as values,
+          count(*) as count
+        FROM (
+          SELECT DISTINCT h.id, h.full_name
+          FROM products p
+          JOIN university_halls h ON p.hall_id = h.id
+          WHERE p.status IN ('available', 'sold', 'pending') AND p.is_approved = true
+        ) h
       `),
 
       // Price ranges
