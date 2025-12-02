@@ -124,6 +124,11 @@ app.get('/delete-account.html', (_: Request, res: Response) => {
   res.sendFile(path.join(__dirname, '../web-payment/delete-account.html'));
 });
 
+// Serve privacy policy HTML page
+app.get('/privacy-policy.html', (_: Request, res: Response) => {
+  res.sendFile(path.join(__dirname, '../web-payment/privacy-policy.html'));
+});
+
 // Test route
 app.get('/api/test', (_: Request, res: Response) => {
   res.send('✅ Backend is working');
