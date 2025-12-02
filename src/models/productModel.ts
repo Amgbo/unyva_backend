@@ -842,7 +842,7 @@ export const getSearchFilters = async () => {
     const query = `
       SELECT
         'categories' as filter_type,
-        array_agg(DISTINCT category) as values,
+        json_agg(DISTINCT category) as values,
         count(DISTINCT category) as count
       FROM products
         WHERE status IN ('available', 'sold', 'pending') AND is_approved = true
@@ -851,7 +851,7 @@ export const getSearchFilters = async () => {
 
       SELECT
         'conditions' as filter_type,
-        array_agg(DISTINCT condition) as values,
+        json_agg(DISTINCT condition) as values,
         count(DISTINCT condition) as count
       FROM products
         WHERE status IN ('available', 'sold', 'pending') AND is_approved = true
@@ -870,7 +870,7 @@ export const getSearchFilters = async () => {
 
       SELECT
         'price_ranges' as filter_type,
-        array_agg(DISTINCT
+        json_agg(DISTINCT
           CASE
             WHEN price < 10 THEN 'Under $10'
             WHEN price < 25 THEN '$10 - $25'
