@@ -844,35 +844,47 @@ export const getSearchFilters = async () => {
       // Categories
       pool.query(`
         SELECT
-          json_agg(DISTINCT json_build_object('value', category)) as values,
-          count(DISTINCT category) as count
-        FROM products
-        WHERE status IN ('available', 'sold', 'pending') AND is_approved = true
+          json_agg(json_build_object('value', category)) as values,
+          count(*) as count
+        FROM (
+          SELECT DISTINCT category
+          FROM products
+          WHERE status IN ('available', 'sold', 'pending') AND is_approved = true
+        ) distinct_categories
       `),
 
       // Conditions
       pool.query(`
         SELECT
-          json_agg(DISTINCT json_build_object('value', condition)) as values,
-          count(DISTINCT condition) as count
-        FROM products
-        WHERE status IN ('available', 'sold', 'pending') AND is_approved = true
+          json_agg(json_build_object('value', condition)) as values,
+          count(*) as count
+        FROM (
+          SELECT DISTINCT condition
+          FROM products
+          WHERE status IN ('available', 'sold', 'pending') AND is_approved = true
+        ) distinct_conditions
       `),
 
       // Halls
       pool.query(`
         SELECT
-          json_agg(DISTINCT json_build_object('id', h.id, 'name', h.full_name)) as values,
-          count(DISTINCT h.id) as count
-        FROM products p
-        JOIN university_halls h ON p.hall_id = h.id
-        WHERE p.status IN ('available', 'sold', 'pending') AND p.is_approved = true
+          json_agg(json_build_object('id', id, 'name', full_name)) as values,
+          count(*) as count
+        FROM (
+          SELECT DISTINCT h.id, h.full_name
+          FROM products p
+          JOIN university_halls h ON p.hall_id = h.id
+          WHERE p.status IN ('available', 'sold', 'pending') AND p.is_approved = true
+        ) distinct_halls
       `),
 
       // Price ranges
       pool.query(`
         SELECT
-          json_agg(DISTINCT json_build_object('value',
+          json_agg(json_build_object('value', price_range)) as values,
+          count(*) as count
+        FROM (
+          SELECT DISTINCT
             CASE
               WHEN price < 10 THEN 'Under $10'
               WHEN price < 25 THEN '$10 - $25'
@@ -880,20 +892,10 @@ export const getSearchFilters = async () => {
               WHEN price < 100 THEN '$50 - $100'
               WHEN price < 500 THEN '$100 - $500'
               ELSE 'Over $500'
-            END
-          )) as values,
-          count(DISTINCT
-            CASE
-              WHEN price < 10 THEN 'Under $10'
-              WHEN price < 25 THEN '$10 - $25'
-              WHEN price < 50 THEN '$25 - $50'
-              WHEN price < 100 THEN '$50 - $100'
-              WHEN price < 500 THEN '$100 - $500'
-              ELSE 'Over $500'
-            END
-          ) as count
-        FROM products
-        WHERE status IN ('available', 'sold', 'pending') AND is_approved = true AND price > 0
+            END as price_range
+          FROM products
+          WHERE status IN ('available', 'sold', 'pending') AND is_approved = true AND price > 0
+        ) distinct_price_ranges
       `)
     ]);
 
