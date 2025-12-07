@@ -50,12 +50,12 @@ export const registerStep1Schema = z.object({
   student_id: z.string().min(1, { message: 'Student ID is required' }),
   email: z.string()
     .email({ message: 'Invalid email format' }),
-  phone: z.string().min(10, { message: 'Phone number must be at least 10 digits' }),
-  gender: z.enum(['Male', 'Female', 'Other'], { required_error: 'Gender is required' }),
-  date_of_birth: z.string().min(1, { message: 'Date of birth is required' }),
+  phone: z.string().optional().or(z.literal('')),
+  gender: z.enum(['Male', 'Female', 'Other']).optional().or(z.literal('')),
+  date_of_birth: z.string().optional().or(z.literal('')),
   
   // CHANGED: address → hall_of_residence
-  hall_of_residence: z.string().min(1, { message: 'Hall of residence is required' }),
+  hall_of_residence: z.string().optional().or(z.literal('')),
   
   // NEW: Room number field (optional)
   room_number: z.string().optional().or(z.literal('')),

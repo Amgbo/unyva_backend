@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS students (
   first_name VARCHAR(100) NOT NULL,
   last_name VARCHAR(100) NOT NULL,
   email VARCHAR(150) UNIQUE NOT NULL,
-  phone VARCHAR(20) NOT NULL,
+  phone VARCHAR(20),
   gender VARCHAR(10),
   hall_of_residence TEXT,
   date_of_birth DATE,
@@ -54,6 +54,16 @@ COMMENT ON COLUMN students.registration_complete IS 'Indicates if student regist
 
 
 
+
+
+-- Migration: Make student fields optional (remove NOT NULL constraints)
+ALTER TABLE students ALTER COLUMN phone DROP NOT NULL;
+ALTER TABLE students ALTER COLUMN gender DROP NOT NULL;
+ALTER TABLE students ALTER COLUMN date_of_birth DROP NOT NULL;
+ALTER TABLE students ALTER COLUMN hall_of_residence DROP NOT NULL;
+ALTER TABLE students ALTER COLUMN university DROP NOT NULL;
+ALTER TABLE students ALTER COLUMN program DROP NOT NULL;
+ALTER TABLE students ALTER COLUMN graduation_year DROP NOT NULL;
 
 select * from students;
 
