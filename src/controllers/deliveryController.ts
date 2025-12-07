@@ -148,7 +148,7 @@ export const acceptDelivery = async (req: AuthRequest, res: Response): Promise<v
 
     // Check if delivery person has unfinished delivery
     const unfinishedDeliveryCheck = await pool.query(
-      `SELECT COUNT(*) as count FROM deliveries 
+      `SELECT COUNT(*) as count FROM deliveries
        WHERE delivery_person_id = $1 AND status IN ('assigned', 'in_progress')`,
       [studentId]
     );
@@ -156,6 +156,20 @@ export const acceptDelivery = async (req: AuthRequest, res: Response): Promise<v
     if (parseInt(unfinishedDeliveryCheck.rows[0].count) > 0) {
       res.status(400).json({ error: 'You have an unfinished delivery. Complete it before accepting a new one.' });
       return;
+    }
+
+    // Check if delivery person is trying to deliver their own product (only admin can do this)
+    const deliveryCheck = await pool.query(
+      `SELECT seller_id FROM deliveries WHERE id = $1`,
+      [deliveryId]
+    );
+
+    if (deliveryCheck.rows.length > 0) {
+      const sellerId = deliveryCheck.rows[0].seller_id;
+      if (sellerId === studentId && studentId !== '22243185') {
+        res.status(403).json({ error: 'You cannot deliver your own products.' });
+        return;
+      }
     }
 
     // Attempt to assign delivery to delivery person if not already assigned
@@ -348,9 +362,10 @@ export const getAvailableDeliveries = async (req: AuthRequest, res: Response): P
        LEFT JOIN university_halls uh1 ON d.pickup_hall_id = uh1.id
        LEFT JOIN university_halls uh2 ON d.delivery_hall_id = uh2.id
        WHERE d.delivery_person_id IS NULL AND d.status = 'pending'
+       AND (d.seller_id != $1 OR $1 = '22243185')
        ORDER BY d.created_at DESC
        LIMIT 20`,
-      []
+      [studentId]
     );
 
     res.json({ success: true, available_deliveries: result.rows, has_unfinished_delivery: false });
