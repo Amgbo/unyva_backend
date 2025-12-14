@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { pool } from '../db.js';
-import imagekit from '../config/imagekit.js';
+import imagekit, { shouldUseImageKit } from '../config/imagekit.js';
+import { getLocalUrl, deleteLocalFile } from '../config/multer.js';
 
 // Dummy announcements data for initial testing
 const dummyAnnouncements = [
@@ -113,7 +114,6 @@ export const addAnnouncement = async (req: any, res: Response): Promise<void> =>
 
       // Validate image file (reuse logic from imageController)
       const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
-      const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
 
       if (req.file.size > MAX_FILE_SIZE) {
         res.status(400).json({
@@ -122,21 +122,21 @@ export const addAnnouncement = async (req: any, res: Response): Promise<void> =>
         return;
       }
 
-      if (!ALLOWED_IMAGE_TYPES.includes(req.file.mimetype)) {
-        res.status(400).json({
-          error: 'Invalid file type. Only JPEG, PNG, and WebP images are allowed.'
+      if (shouldUseImageKit() && imagekit) {
+        // Upload to ImageKit
+        const result = await imagekit.upload({
+          file: req.file.buffer,
+          fileName: `announcement-${Date.now()}-${req.file.originalname}`,
+          folder: "/unyva_announcements",
         });
-        return;
+        imageUrl = result.url;
+        console.log('✅ Image uploaded to ImageKit:', imageUrl);
+      } else {
+        // Saved locally by multer
+        const filename = (req.file.filename as string) || req.file.originalname;
+        imageUrl = getLocalUrl('announcements', filename);
+        console.log('✅ Image saved locally:', imageUrl);
       }
-
-      // Upload to ImageKit
-      const result = await imagekit.upload({
-        file: req.file.buffer,
-        fileName: `announcement-${Date.now()}-${req.file.originalname}`,
-        folder: "/unyva_announcements",
-      });
-      imageUrl = result.url;
-      console.log('✅ Image uploaded successfully:', imageUrl);
     }
 
     // Insert into database
@@ -197,8 +197,24 @@ export const deleteAnnouncement = async (req: any, res: Response): Promise<void>
     // Delete from database
     await pool.query('DELETE FROM announcements WHERE id = $1', [id]);
 
-    // TODO: If there's an image_url, we might want to delete it from ImageKit as well
-    // For now, we'll just leave the image in storage
+    // If there's an image_url, delete from ImageKit or local storage
+    if (announcement.image_url) {
+      try {
+        if (shouldUseImageKit() && imagekit) {
+          const parts = announcement.image_url.split('/');
+          const fileId = parts[parts.length - 1];
+          await imagekit.deleteFile(fileId);
+          console.log('🗑️ Deleted announcement image from ImageKit:', fileId);
+        } else {
+          const parts = announcement.image_url.split('/');
+          const filename = parts[parts.length - 1];
+          await deleteLocalFile('announcements', filename);
+          console.log('🗑️ Deleted local announcement image:', filename);
+        }
+      } catch (err: any) {
+        console.error('⚠️ Failed to delete announcement image:', err?.message || err);
+      }
+    }
 
     console.log('✅ Announcement deleted successfully');
     res.status(200).json({

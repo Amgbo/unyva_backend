@@ -1,7 +1,6 @@
 // src/routes/imageRoutes.ts
 import { Router } from 'express';
-import multer from 'multer';
-import path from 'path';
+import { createMulter } from '../config/multer.js';
 import {
   uploadProductImage,
   uploadMultipleProductImages,
@@ -9,29 +8,8 @@ import {
   getImageInfo
 } from '../controllers/imageController.js';
 
-// File filter for images
-const fileFilter = (req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
-  const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-  const allowedExtensions = ['.jpg', '.jpeg', '.png', '.webp'];
-
-  const fileExt = path.extname(file.originalname).toLowerCase();
-
-  if (allowedTypes.includes(file.mimetype) && allowedExtensions.includes(fileExt)) {
-    cb(null, true);
-  } else {
-    cb(new Error('Invalid file type. Only JPEG, PNG, and WebP images are allowed.'));
-  }
-};
-
-// Configure multer with memory storage
-const upload = multer({
-  storage: multer.memoryStorage(),
-  fileFilter,
-  limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB limit
-    files: 5 // Maximum 5 files for multiple upload
-  }
-});
+// Create conditional multer: products folder for local storage
+const upload = createMulter(undefined, 'products');
 
 const router = Router();
 

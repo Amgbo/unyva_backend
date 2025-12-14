@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import multer from 'multer';
+import { createMulter } from '../config/multer.js';
 import {
   registerStep1,
   completeRegistration,
@@ -14,20 +14,8 @@ import { authMiddleware } from '../middleware/authMiddleware.js';
 
 const router = Router();
 
-// Configure multer with memory storage
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB limit
-  },
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only image files are allowed!'));
-    }
-  },
-});
+// Create conditional multer instance: profile_picture -> profiles, id_card -> idcards
+const upload = createMulter({ profile_picture: 'profiles', id_card: 'idcards' }, 'profiles');
 
 // Step 1: Basic registration
 router.post('/register-step1', registerStep1);

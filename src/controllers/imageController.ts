@@ -1,7 +1,9 @@
 // src/controllers/imageController.ts
 import { Request, Response } from 'express';
-import imagekit from '../config/imagekit.js';
+import imagekit, { shouldUseImageKit } from '../config/imagekit.js';
 import path from 'path';
+import { getLocalUrl, deleteLocalFile } from '../config/multer.js';
+import fs from 'fs';
 
 // Configure upload limits and validation
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
@@ -49,13 +51,21 @@ export const uploadProductImage = async (req: Request, res: Response): Promise<v
       return;
     }
 
-    // Upload to ImageKit
-    const result = await imagekit.upload({
-      file: req.file.buffer,
-      fileName: `${Date.now()}-${req.file.originalname}`,
-      folder: "/unyva_uploads",
-    });
-    const imageUrl = result.url;
+    // Conditional upload: ImageKit or local disk
+    let imageUrl: string;
+    if (shouldUseImageKit() && imagekit) {
+      const result = await imagekit.upload({
+        file: req.file.buffer,
+        fileName: `${Date.now()}-${req.file.originalname}`,
+        folder: "/unyva_uploads",
+      });
+      imageUrl = result.url;
+    } else {
+      // Local storage: multer.diskStorage should have saved file to uploads/products
+      // req.file.filename should be set by multer
+      const filename = (req.file.filename as string) || req.file.originalname;
+      imageUrl = getLocalUrl('products', filename);
+    }
 
     res.status(201).json({
       success: true,
@@ -120,13 +130,18 @@ export const uploadMultipleProductImages = async (req: Request, res: Response): 
         continue;
       }
 
-      // Upload to ImageKit
-      const result = await imagekit.upload({
-        file: file.buffer,
-        fileName: `${Date.now()}-${file.originalname}`,
-        folder: "/unyva_uploads",
-      });
-      const imageUrl = result.url;
+      let imageUrl: string;
+      if (shouldUseImageKit() && imagekit) {
+        const result = await imagekit.upload({
+          file: file.buffer,
+          fileName: `${Date.now()}-${file.originalname}`,
+          folder: "/unyva_uploads",
+        });
+        imageUrl = result.url;
+      } else {
+        const filename = (file.filename as string) || file.originalname;
+        imageUrl = getLocalUrl('products', filename);
+      }
       uploadedImages.push({
         filename: file.filename,
         originalName: file.originalname,
@@ -178,8 +193,13 @@ export const deleteProductImage = async (req: Request, res: Response): Promise<v
       return;
     }
 
-    // Delete from ImageKit using fileId (assuming filename is the fileId)
-    await imagekit.deleteFile(filename);
+    if (shouldUseImageKit() && imagekit) {
+      // Delete from ImageKit using fileId (assuming filename is fileId)
+      await imagekit.deleteFile(filename);
+    } else {
+      // Delete from local storage (products folder)
+      await deleteLocalFile('products', filename);
+    }
 
     res.status(200).json({
       success: true,
@@ -208,22 +228,40 @@ export const getImageInfo = async (req: Request, res: Response): Promise<void> =
       return;
     }
 
-    // Get image info from ImageKit (assuming filename is fileId)
-    const result = await imagekit.getFileDetails(filename);
-
-    res.status(200).json({
-      success: true,
-      data: {
-        filename,
-        url: result.url,
-        size: result.size,
-        createdAt: new Date(result.createdAt),
-        modifiedAt: new Date(result.createdAt),
-        width: result.width,
-        height: result.height,
-        format: result.fileType
+    if (shouldUseImageKit() && imagekit) {
+      const result = await imagekit.getFileDetails(filename);
+      res.status(200).json({
+        success: true,
+        data: {
+          filename,
+          url: result.url,
+          size: result.size,
+          createdAt: new Date(result.createdAt),
+          modifiedAt: new Date(result.createdAt),
+          width: result.width,
+          height: result.height,
+          format: result.fileType
+        }
+      });
+    } else {
+      // Local file info
+      const filePath = path.join(process.cwd(), 'uploads', 'products', filename);
+      if (!fs.existsSync(filePath)) {
+        res.status(404).json({ success: false, error: 'File not found' });
+        return;
       }
-    });
+      const stats = await fs.promises.stat(filePath);
+      res.status(200).json({
+        success: true,
+        data: {
+          filename,
+          url: getLocalUrl('products', filename),
+          size: stats.size,
+          createdAt: stats.birthtime,
+          modifiedAt: stats.mtime,
+        }
+      });
+    }
   } catch (error) {
     console.error('❌ Error getting image info:', error);
     res.status(500).json({

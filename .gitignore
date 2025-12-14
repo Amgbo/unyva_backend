@@ -70,6 +70,12 @@ jspm_packages/
 
 # Uploads
 uploads/
+# Specific upload subfolders (local dev)
+uploads/profiles/
+uploads/idcards/
+uploads/announcements/
+uploads/products/
+uploads/services/
 
 # OS generated files
 .DS_Store

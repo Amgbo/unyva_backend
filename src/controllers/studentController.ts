@@ -9,7 +9,8 @@ import {
   registerStep2Schema,
 } from '../validators/studentValidator.js';
 import { deliveryCodeManager } from '../utils/DeliveryCodeManager.js';
-import imagekit from '../config/imagekit.js';
+import imagekit, { shouldUseImageKit } from '../config/imagekit.js';
+import { getLocalUrl, deleteLocalFile } from '../config/multer.js';
 
 // Email transporter (Gmail) - Initialize only if credentials are provided
 let transporter: any = null;
@@ -217,48 +218,61 @@ export const completeRegistration = async (req: Request, res: Response): Promise
     console.log('🔐 Hashing password for student:', student_id);
     const hashedPassword = await bcrypt.hash(password, 8); // Reduced from 10 to 8 for faster registration
 
-    // Upload profile picture and ID card to ImageKit asynchronously (fire-and-forget)
+    // Upload profile picture and ID card conditionally (ImageKit or local)
     let profilePictureUrl = null;
     let idCardUrl = null;
 
-    // Start uploads asynchronously without waiting
-    const uploadPromises = [];
+    const uploadPromises: Promise<any>[] = [];
 
     if (profilePicFile) {
-      const profileUploadPromise = imagekit.upload({
-        file: profilePicFile.buffer,
-        fileName: `${student_id}-profile-${Date.now()}.jpg`,
-        folder: "/unyva_profiles",
-      }).then(result => {
-        profilePictureUrl = result.url;
-        console.log('📸 Profile picture uploaded to ImageKit:', profilePictureUrl);
-        // Update database with profile picture URL asynchronously
-        return pool.query('UPDATE students SET profile_picture = $1 WHERE student_id = $2', [result.url, student_id]);
-      }).catch(error => {
-        console.error('⚠️ Profile picture upload failed:', error.message);
-      });
-      uploadPromises.push(profileUploadPromise);
+      if (shouldUseImageKit() && imagekit && profilePicFile.buffer) {
+        const profileUploadPromise = imagekit.upload({
+          file: profilePicFile.buffer,
+          fileName: `${student_id}-profile-${Date.now()}.jpg`,
+          folder: "/unyva_profiles",
+        }).then(result => {
+          profilePictureUrl = result.url;
+          console.log('📸 Profile picture uploaded to ImageKit:', profilePictureUrl);
+          return pool.query('UPDATE students SET profile_picture = $1 WHERE student_id = $2', [result.url, student_id]);
+        }).catch(error => {
+          console.error('⚠️ Profile picture upload failed:', error.message);
+        });
+        uploadPromises.push(profileUploadPromise);
+      } else {
+        // Local storage: multer.diskStorage should have saved file
+        const filename = (profilePicFile.filename as string) || profilePicFile.originalname;
+        profilePictureUrl = getLocalUrl('profiles', filename);
+        // update DB asynchronously
+        uploadPromises.push(pool.query('UPDATE students SET profile_picture = $1 WHERE student_id = $2', [profilePictureUrl, student_id]));
+        console.log('📸 Profile picture saved locally:', profilePictureUrl);
+      }
     }
 
     if (idCardFile) {
-      const idCardUploadPromise = imagekit.upload({
-        file: idCardFile.buffer,
-        fileName: `${student_id}-idcard-${Date.now()}.jpg`,
-        folder: "/unyva_idcards",
-      }).then(result => {
-        idCardUrl = result.url;
-        console.log('🆔 ID card uploaded to ImageKit:', idCardUrl);
-        // Update database with ID card URL asynchronously
-        return pool.query('UPDATE students SET id_card = $1 WHERE student_id = $2', [result.url, student_id]);
-      }).catch(error => {
-        console.error('⚠️ ID card upload failed:', error.message);
-      });
-      uploadPromises.push(idCardUploadPromise);
+      if (shouldUseImageKit() && imagekit && idCardFile.buffer) {
+        const idCardUploadPromise = imagekit.upload({
+          file: idCardFile.buffer,
+          fileName: `${student_id}-idcard-${Date.now()}.jpg`,
+          folder: "/unyva_idcards",
+        }).then(result => {
+          idCardUrl = result.url;
+          console.log('🆔 ID card uploaded to ImageKit:', idCardUrl);
+          return pool.query('UPDATE students SET id_card = $1 WHERE student_id = $2', [result.url, student_id]);
+        }).catch(error => {
+          console.error('⚠️ ID card upload failed:', error.message);
+        });
+        uploadPromises.push(idCardUploadPromise);
+      } else {
+        const filename = (idCardFile.filename as string) || idCardFile.originalname;
+        idCardUrl = getLocalUrl('idcards', filename);
+        uploadPromises.push(pool.query('UPDATE students SET id_card = $1 WHERE student_id = $2', [idCardUrl, student_id]));
+        console.log('🆔 ID card saved locally:', idCardUrl);
+      }
     }
 
-    // Don't wait for uploads to complete - they will finish asynchronously
+    // Fire-and-forget updates
     Promise.allSettled(uploadPromises).then(results => {
-      console.log('📤 Image upload results:', results.map(r => r.status));
+      console.log('📤 Image upload/update results:', results.map(r => r.status));
     });
 
     // Convert date from "DD-MM-YYYY" to "YYYY-MM-DD" for PostgreSQL
@@ -580,14 +594,20 @@ export const updateStudentProfile = async (req: any, res: Response): Promise<voi
       });
       const profilePicFile = req.files.find((file: Express.Multer.File) => file.fieldname === 'profile_picture');
       if (profilePicFile) {
-        // Upload to ImageKit
-        const profileResult = await imagekit.upload({
-          file: profilePicFile.buffer,
-          fileName: `${studentIdFromToken}-profile-${Date.now()}.jpg`,
-          folder: "/unyva_profiles",
-        });
-        profilePictureUrl = profileResult.url;
-        console.log('📸 Profile picture uploaded to ImageKit:', profilePictureUrl);
+        if (shouldUseImageKit() && imagekit && profilePicFile.buffer) {
+          const profileResult = await imagekit.upload({
+            file: profilePicFile.buffer,
+            fileName: `${studentIdFromToken}-profile-${Date.now()}.jpg`,
+            folder: "/unyva_profiles",
+          });
+          profilePictureUrl = profileResult.url;
+          console.log('📸 Profile picture uploaded to ImageKit:', profilePictureUrl);
+        } else {
+          // Local storage
+          const filename = (profilePicFile.filename as string) || profilePicFile.originalname;
+          profilePictureUrl = getLocalUrl('profiles', filename);
+          console.log('📸 Profile picture saved locally:', profilePictureUrl);
+        }
       } else {
         console.log('⚠️ No profile_picture file found in req.files');
       }
@@ -772,14 +792,20 @@ export const deleteAccount = async (req: any, res: Response): Promise<void> => {
     try {
       await client.query('BEGIN');
 
-      // Delete images from ImageKit if they exist
+      // Delete images from ImageKit or local storage if they exist
       if (student.profile_picture) {
         try {
-          // Extract fileId from URL (assuming URL format: https://ik.imagekit.io/.../fileId)
-          const urlParts = student.profile_picture.split('/');
-          const fileId = urlParts[urlParts.length - 1];
-          await imagekit.deleteFile(fileId);
-          console.log('🗑️ Deleted profile picture from ImageKit:', fileId);
+          if (shouldUseImageKit() && imagekit) {
+            const urlParts = student.profile_picture.split('/');
+            const fileId = urlParts[urlParts.length - 1];
+            await imagekit.deleteFile(fileId);
+            console.log('🗑️ Deleted profile picture from ImageKit:', fileId);
+          } else {
+            const parts = student.profile_picture.split('/');
+            const filename = parts[parts.length - 1];
+            await deleteLocalFile('profiles', filename);
+            console.log('🗑️ Deleted local profile picture:', filename);
+          }
         } catch (imageError) {
           console.error('⚠️ Failed to delete profile picture:', imageError);
         }
@@ -787,10 +813,17 @@ export const deleteAccount = async (req: any, res: Response): Promise<void> => {
 
       if (student.id_card) {
         try {
-          const urlParts = student.id_card.split('/');
-          const fileId = urlParts[urlParts.length - 1];
-          await imagekit.deleteFile(fileId);
-          console.log('🗑️ Deleted ID card from ImageKit:', fileId);
+          if (shouldUseImageKit() && imagekit) {
+            const urlParts = student.id_card.split('/');
+            const fileId = urlParts[urlParts.length - 1];
+            await imagekit.deleteFile(fileId);
+            console.log('🗑️ Deleted ID card from ImageKit:', fileId);
+          } else {
+            const parts = student.id_card.split('/');
+            const filename = parts[parts.length - 1];
+            await deleteLocalFile('idcards', filename);
+            console.log('🗑️ Deleted local ID card:', filename);
+          }
         } catch (imageError) {
           console.error('⚠️ Failed to delete ID card:', imageError);
         }

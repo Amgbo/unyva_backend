@@ -34,6 +34,8 @@ import {
   ServiceBooking,
   ServiceNotification
 } from '../models/serviceModel.js';
+import imagekit, { shouldUseImageKit } from '../config/imagekit.js';
+import { getLocalUrl, deleteLocalFile } from '../config/multer.js';
 import { ReviewModel } from '../models/reviewModel.js';
 
 // GET: Single service by ID
@@ -189,6 +191,32 @@ export const createNewService = async (req: AuthRequest, res: Response): Promise
       image_urls: req.body.image_urls ? (Array.isArray(req.body.image_urls) ? req.body.image_urls : [req.body.image_urls]) : []
     };
 
+    // If files were uploaded (multer), process them and append to image_urls
+    const uploadedFiles = req.files as Express.Multer.File[] | undefined;
+    if (uploadedFiles && uploadedFiles.length > 0) {
+      const uploadedUrls: string[] = [];
+      for (const file of uploadedFiles) {
+        try {
+          if (shouldUseImageKit() && imagekit && file.buffer) {
+            const result = await imagekit.upload({
+              file: file.buffer,
+              fileName: `${studentId}-service-${Date.now()}-${file.originalname}`,
+              folder: "/unyva_services",
+            });
+            uploadedUrls.push(result.url);
+          } else {
+            const filename = (file.filename as string) || file.originalname;
+            uploadedUrls.push(getLocalUrl('services', filename));
+          }
+        } catch (err) {
+          console.error('⚠️ Failed to process uploaded service image:', err);
+        }
+      }
+
+      // merge existing image_urls from body with uploaded ones
+      serviceData.image_urls = [...(serviceData.image_urls || []), ...uploadedUrls];
+    }
+
     // Validate required fields
     if (!serviceData.title || !serviceData.price || !serviceData.description ||
         !serviceData.category || !serviceData.contact_method) {
@@ -209,7 +237,7 @@ export const createNewService = async (req: AuthRequest, res: Response): Promise
       return;
     }
 
-    const service = await createService(serviceData);
+  const service = await createService(serviceData);
 
     res.status(201).json({
       success: true,
@@ -265,6 +293,33 @@ export const updateExistingService = async (req: AuthRequest, res: Response): Pr
       image_urls: req.body.image_urls
     };
 
+    // If files were uploaded, process and override image_urls (merge if needed)
+    const uploadedFiles = req.files as Express.Multer.File[] | undefined;
+    if (uploadedFiles && uploadedFiles.length > 0) {
+      const uploadedUrls: string[] = [];
+      for (const file of uploadedFiles) {
+        try {
+          if (shouldUseImageKit() && imagekit && file.buffer) {
+            const result = await imagekit.upload({
+              file: file.buffer,
+              fileName: `${req.user?.student_id}-service-${Date.now()}-${file.originalname}`,
+              folder: "/unyva_services",
+            });
+            uploadedUrls.push(result.url);
+          } else {
+            const filename = (file.filename as string) || file.originalname;
+            uploadedUrls.push(getLocalUrl('services', filename));
+          }
+        } catch (err) {
+          console.error('⚠️ Failed to process uploaded service image:', err);
+        }
+      }
+
+      // If request includes image_urls in body, merge them with uploaded ones; otherwise replace
+      const bodyUrls = req.body.image_urls ? (Array.isArray(req.body.image_urls) ? req.body.image_urls : [req.body.image_urls]) : [];
+      updateData.image_urls = [...bodyUrls, ...uploadedUrls];
+    }
+
     const updatedService = await updateService(serviceId, updateData);
 
     if (!updatedService) {
@@ -313,6 +368,9 @@ export const deleteExistingService = async (req: AuthRequest, res: Response): Pr
       return;
     }
 
+    // Fetch service images before deletion so we can remove files from storage
+    const existingService = await getServiceById(serviceId);
+
     const deleted = await deleteService(serviceId, studentId);
 
     if (!deleted) {
@@ -321,6 +379,30 @@ export const deleteExistingService = async (req: AuthRequest, res: Response): Pr
         error: 'Service not found or you do not have permission to delete it'
       });
       return;
+    }
+
+    // Delete images from ImageKit or local storage
+    try {
+      const images = existingService?.images || [];
+      for (const imgUrl of images) {
+        try {
+          if (shouldUseImageKit() && imagekit) {
+            const parts = imgUrl.split('/');
+            const fileId = parts[parts.length - 1];
+            await imagekit.deleteFile(fileId);
+            console.log('🗑️ Deleted service image from ImageKit:', fileId);
+          } else {
+            const parts = imgUrl.split('/');
+            const filename = parts[parts.length - 1];
+            await deleteLocalFile('services', filename);
+            console.log('🗑️ Deleted local service image:', filename);
+          }
+        } catch (innerErr) {
+          console.error('⚠️ Failed to delete service image:', innerErr);
+        }
+      }
+    } catch (err) {
+      console.error('⚠️ Error while deleting service images:', err);
     }
 
     res.status(200).json({

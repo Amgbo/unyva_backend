@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { createMulter } from '../config/multer.js';
 import {
   getService,
   getMyServices,
@@ -41,10 +42,12 @@ router.get('/featured', getFeaturedServicesController);
 router.use(verifyToken);
 
 /* Service management */
-router.post('/', createNewService);
+// Accept up to 5 images under field 'images' for service creation/update
+const upload = createMulter(undefined, 'services');
+router.post('/', upload.array('images', 5), createNewService);
 router.get('/provider/my-services', getMyServices);
 router.get('/provider/stats', getProviderStatsController);
-router.put('/:id', updateExistingService);
+router.put('/:id', upload.array('images', 5), updateExistingService);
 router.delete('/:id', deleteExistingService);
 
 /* Bookings */

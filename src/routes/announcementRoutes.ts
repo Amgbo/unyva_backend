@@ -1,32 +1,10 @@
 import { Router } from 'express';
-import multer from 'multer';
-import path from 'path';
+import { createMulter } from '../config/multer.js';
 import { getAnnouncements, getAnnouncementById, addAnnouncement, deleteAnnouncement } from '../controllers/announcementController.js';
 import { authMiddleware } from '../middleware/authMiddleware.js';
 
-// File filter for images
-const fileFilter = (req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
-  const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-  const allowedExtensions = ['.jpg', '.jpeg', '.png', '.webp'];
-
-  const fileExt = path.extname(file.originalname).toLowerCase();
-
-  if (allowedTypes.includes(file.mimetype) && allowedExtensions.includes(fileExt)) {
-    cb(null, true);
-  } else {
-    cb(new Error('Invalid file type. Only JPEG, PNG, and WebP images are allowed.'));
-  }
-};
-
-// Configure multer with memory storage for announcements
-const upload = multer({
-  storage: multer.memoryStorage(),
-  fileFilter,
-  limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB limit
-    files: 1 // Maximum 1 file for announcements
-  }
-});
+// Create conditional multer: announcements folder for local storage
+const upload = createMulter(undefined, 'announcements');
 
 const router = Router();
 
