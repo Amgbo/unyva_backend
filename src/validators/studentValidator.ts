@@ -49,7 +49,12 @@ export const registerStep1Schema = z.object({
   last_name: z.string().min(1, { message: 'Last name is required' }),
   student_id: z.string().min(1, { message: 'Student ID is required' }),
   email: z.string()
-    .email({ message: 'Invalid email format' }),
+    .email({ message: 'Invalid email format' })
+    .refine(async (email) => {
+      // For now, allow any email format - university validation will be done in controller
+      // This will be enhanced with real-time validation later
+      return true;
+    }, { message: 'Email domain must match selected university' }),
   phone: z.string().optional().or(z.literal('')),
   gender: z.enum(['Male', 'Female', 'Other']).optional().or(z.literal('')),
   date_of_birth: z.string().optional().or(z.literal('')),

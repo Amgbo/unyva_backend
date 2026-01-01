@@ -5,10 +5,10 @@ export interface AuthRequest extends Request {
   user?: any;
 }
 
-export const authMiddleware = (
+export const authMiddleware = async (
   req: AuthRequest,
    res: Response,
-    next: NextFunction): void => {
+    next: NextFunction): Promise<void> => {
   console.log('authMiddleware called for path:', req.path, 'method:', req.method);
   const authHeader = req.headers['authorization'];
 
@@ -21,9 +21,23 @@ export const authMiddleware = (
   const token = authHeader.split(' ')[1];
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET as string);
-    req.user = decoded; // store decoded data for controllers
-    console.log('Token decoded successfully, user:', decoded);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as any;
+
+    // Get the user from the database using student_id
+    const { pool } = await import('../db.js');
+    const userQuery = await pool.query('SELECT student_id FROM students WHERE student_id = $1', [decoded.student_id]);
+
+    if (userQuery.rows.length === 0) {
+      res.status(401).json({ error: 'User not found' });
+      return;
+    }
+
+    req.user = {
+      ...decoded,
+      id: decoded.student_id // Use student_id as the id since it's the primary key
+    };
+
+    console.log('Token decoded successfully, user:', req.user);
     next();
   } catch (err) {
     console.log('Token verification failed:', err);

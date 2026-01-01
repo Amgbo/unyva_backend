@@ -7,7 +7,7 @@ export interface Product {
   title: string;
   price: number;
   description: string;
-  category: 'Books' | 'Electronics' | 'Fashion' | 'Hostel Items' | 'Food' | 'Other';
+  category: 'Books' | 'Books & Study Materials' | 'Phones & Accessories' | 'Laptops & Computers' | 'Electronics' | 'Electronics & Gadgets' | 'Fashion' | 'Clothing & Fashion' | 'Hostel Items' | 'Hostel Essentials' | 'Food' | 'Food & Snacks' | 'Sports & Fitness' | 'Beauty & Personal Care' | 'Stationery & Art Supplies' | 'Furniture & Decor' | 'Gaming & Entertainment' | 'Transportation' | 'Other';
   condition: 'New' | 'Used' | 'Like New' | 'Good' | 'Fair';
   contact_method: 'WhatsApp' | 'Call' | 'SMS' | 'in_app';
   hall_id?: number;

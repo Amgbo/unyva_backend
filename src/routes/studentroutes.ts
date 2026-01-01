@@ -11,6 +11,10 @@ import {
   deleteAccount,
 } from '../controllers/studentController.js';
 import { authMiddleware } from '../middleware/authMiddleware.js';
+import { DealController } from '../controllers/dealController.js';
+import { SellerReviewController } from '../controllers/sellerReviewController.js';
+import { FollowController } from '../controllers/followController.js';
+import { ThroneController } from '../controllers/throneController.js';
 
 const router = Router();
 
@@ -43,5 +47,24 @@ router.put('/profile', authMiddleware, upload.any(), updateStudentProfile);
 
 // Delete account (protected)
 router.delete('/delete-account', authMiddleware, deleteAccount);
+
+// Follow routes
+router.post('/follow', authMiddleware, FollowController.followUser);
+router.post('/unfollow', authMiddleware, FollowController.unfollowUser);
+router.get('/:userId/following', FollowController.getFollowing);
+router.get('/:userId/followers', FollowController.getFollowers);
+router.get('/:userId/follow-stats', FollowController.getFollowStats);
+router.get('/:userId/is-following', authMiddleware, FollowController.isFollowing);
+router.get('/mutual-follows', authMiddleware, FollowController.getMutualFollows);
+router.get('/leaderboard/most-followed', FollowController.getMostFollowedLeaderboard);
+router.get('/leaderboard/top-sellers', FollowController.getTopSellersLeaderboard);
+router.get('/leaderboard/highest-rated', FollowController.getHighestRatedLeaderboard);
+
+// Seller review routes
+router.post('/reviews', authMiddleware, SellerReviewController.createReview);
+router.get('/:sellerId/reviews', SellerReviewController.getSellerReviews);
+router.put('/reviews/:id', authMiddleware, SellerReviewController.updateReview);
+router.delete('/reviews/:id', authMiddleware, SellerReviewController.deleteReview);
+router.get('/deals/:dealId/can-review', authMiddleware, SellerReviewController.canUserReviewDeal);
 
 export { router as studentRouter };

@@ -6,7 +6,7 @@ export interface Service {
   title: string;
   description: string;
   price: number;
-  category: 'Tutoring' | 'Laundry & Cleaning' | 'Cooking & Meal Prep' | 'IT & Tech Support' | 'Graphic Design' | 'Other';
+  category: 'Tutoring' | 'Academic Tutoring' | 'Writing & Research' | 'Laundry & Cleaning' | 'Cooking & Meal Prep' | 'Cooking & Meal Services' | 'Tech Support & Repairs' | 'IT & Tech Support' | 'Graphic Design' | 'Graphic Design & Creative' | 'Photography & Videography' | 'Transportation & Delivery' | 'Fitness & Wellness' | 'Music & Performance' | 'Event Planning' | 'Language Tutoring' | 'Programming & IT' | 'Career Services' | 'Other';
   contact_method: 'WhatsApp' | 'Call' | 'SMS' | 'in_app';
   hall_id?: number;
   room_number?: string;

@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { pool } from '../db.js';
 import { AuthRequest } from '../middleware/authMiddleware.js';
+import { notificationService } from '../services/notificationService.js';
 
 /**
  * Delivery Controller - Handles delivery person operations
@@ -276,6 +277,46 @@ export const completeDelivery = async (req: AuthRequest, res: Response): Promise
        WHERE id = (SELECT order_id FROM deliveries WHERE id = $1)`,
       [deliveryId]
     );
+
+    // Send notification to customer about delivery completion
+    try {
+      const deliveryInfo = await pool.query(
+        `SELECT d.order_id, o.order_number, p.title as product_title, d.customer_id
+         FROM deliveries d
+         JOIN orders o ON d.order_id = o.id
+         JOIN products p ON o.product_id = p.id
+         WHERE d.id = $1`,
+        [deliveryId]
+      );
+
+      if (deliveryInfo.rows.length > 0) {
+        const { order_id, order_number, product_title, customer_id } = deliveryInfo.rows[0];
+
+        await notificationService.createDeliveryStatusNotification(
+          customer_id,
+          order_id,
+          'completed',
+          {
+            order_number,
+            product_title
+          }
+        );
+
+        // Also send payment confirmation notification
+        await notificationService.createPaymentStatusNotification(
+          customer_id,
+          order_id,
+          'paid',
+          {
+            order_number,
+            product_title
+          }
+        );
+      }
+    } catch (notificationError) {
+      console.error('Failed to send delivery completion notification:', notificationError);
+      // Don't fail the request if notification fails
+    }
 
     // Update delivery person's rating if rating provided
     if (rating !== undefined) {

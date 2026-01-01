@@ -22,9 +22,14 @@ import deliveryRoutes from './routes/deliveryRoutes.js';
 import orderRoutes from './routes/orderRoutes.js';
 import reviewRoutes from './routes/reviewRoutes.js';
 import { announcementRouter as announcementRoutes } from './routes/announcementRoutes.js';
+import notificationRoutes from './routes/notificationRoutes.js';
 import paymentRoutes from './routes/paymentRoutes.js';
 import openProductRoutes from './routes/openProductRoutes.js';
 import { deleteAccountRouter } from './routes/deleteAccountRoutes.js';
+import messageRoutes from './routes/messageRoutes.js';
+import behaviorRoutes from './routes/behaviorRoutes.js';
+import recommendationRoutes from './routes/recommendationRoutes.js';
+import dealRoutes from './routes/dealRoutes.js';
 
 // Initialize app
 const app = express();
@@ -65,8 +70,30 @@ app.use(cors({
 }));
 */
 
-// -------------------- NEW SIMPLIFIED CORS CONFIG --------------------
-app.use(cors({ origin: "*", credentials: true }));
+// -------------------- CORS CONFIG (safer for credentials) --------------------
+// If ALLOWED_ORIGINS is provided in environment, use it as a whitelist.
+// Otherwise, reflect the request origin. This allows Access-Control-Allow-Credentials
+// to be true while still returning a specific origin header (not "*").
+const allowedOriginsEnv = process.env.ALLOWED_ORIGINS || '';
+const allowedOrigins = allowedOriginsEnv ? allowedOriginsEnv.split(',').map(s => s.trim()) : [];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow non-browser requests (curl, server-to-server) which have no origin
+    if (!origin) return callback(null, true);
+
+    // If a whitelist is configured, only allow those origins
+    if (allowedOrigins.length > 0) {
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      console.log('CORS blocked for origin:', origin);
+      return callback(new Error(`CORS blocked for origin: ${origin}`));
+    }
+
+    // No whitelist configured — reflect the requesting origin
+    return callback(null, origin);
+  },
+  credentials: true,
+}));
 
 // ESM-friendly __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -104,14 +131,20 @@ app.use('/api/deliveries', deliveryRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/announcements', announcementRoutes);
+app.use('/api/notifications', notificationRoutes);
 app.use('/api', openProductRoutes);
 app.use('/api', deleteAccountRouter);
+app.use('/api/messages', messageRoutes);
+app.use('/api/behavior', behaviorRoutes);
+app.use('/api/recommendations', recommendationRoutes);
+app.use('/api/deals', dealRoutes);
 
 console.log('✅ Admin routes registered at /api/admin');
 console.log('✅ Delivery routes registered at /api/deliveries');
 console.log('✅ Order routes registered at /api/orders');
 console.log('✅ Review routes registered at /api/reviews');
 console.log('✅ Announcement routes registered at /api/announcements');
+console.log('✅ Notification routes registered at /api/notifications');
 console.log('✅ Open product routes registered at /api');
 
 // Root sanity check

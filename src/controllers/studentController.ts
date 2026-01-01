@@ -11,6 +11,7 @@ import {
 import { deliveryCodeManager } from '../utils/DeliveryCodeManager.js';
 import imagekit, { shouldUseImageKit } from '../config/imagekit.js';
 import { getLocalUrl, deleteLocalFile } from '../config/multer.js';
+import { isValidUniversityEmail, getAllUniversities } from '../models/universityModel.js';
 
 // Email transporter (Gmail) - Initialize only if credentials are provided
 let transporter: any = null;
@@ -73,6 +74,18 @@ export const registerStep1 = async (req: Request, res: Response): Promise<void> 
     program = null,
     graduation_year = null,
   } = parsed.data;
+
+  // Validate university email domain if university is selected
+  if (university) {
+    const isValidEmail = await isValidUniversityEmail(email, university);
+    if (!isValidEmail) {
+      res.status(400).json({
+        error: 'Invalid email domain',
+        message: `Email must be from ${university} domain. Please use your university email address.`
+      });
+      return;
+    }
+  }
 
   try {
     // Validate delivery code if role is 'delivery'
@@ -282,6 +295,19 @@ export const completeRegistration = async (req: Request, res: Response): Promise
     console.log('📅 Original date:', date_of_birth);
     console.log('📅 Formatted date for PostgreSQL:', formattedDob);
 
+    // Get university_id from universities table if university is provided
+    let universityId = null;
+    if (university) {
+      const universityResult = await pool.query(
+        'SELECT id FROM universities WHERE name = $1',
+        [university]
+      );
+      if (universityResult.rows.length > 0) {
+        universityId = universityResult.rows[0].id;
+        console.log('🏫 Found university ID:', universityId, 'for university:', university);
+      }
+    }
+
     const verificationToken = crypto.randomBytes(32).toString('hex');
 
     console.log('💾 Inserting complete student record into database...');
@@ -290,8 +316,8 @@ export const completeRegistration = async (req: Request, res: Response): Promise
         (student_id, email, first_name, last_name, phone, gender, date_of_birth,
          hall_of_residence, room_number, password, profile_picture, id_card,
          verification_token, is_verified, role, delivery_code, is_delivery_approved,
-         university, program, graduation_year, registration_complete)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+         university, university_id, program, graduation_year, registration_complete)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
        RETURNING student_id, email, first_name, last_name, phone, role, university, program`,
       [
         student_id,
@@ -312,6 +338,7 @@ export const completeRegistration = async (req: Request, res: Response): Promise
         delivery_code,
         role === 'delivery', // is_delivery_approved
         university,
+        universityId,
         program,
         graduation_year,
         true, // registration_complete

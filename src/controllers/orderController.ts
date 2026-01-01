@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { pool } from '../db.js';
 import { authMiddleware } from '../middleware/authMiddleware.js';
+import { notificationService } from '../services/notificationService.js';
 
 export const createOrder = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -171,6 +172,24 @@ export const createOrder = async (req: Request, res: Response): Promise<void> =>
       }
 
       await client.query('COMMIT');
+
+      // Send notification to seller about new order
+      try {
+        await notificationService.createNewOrderNotification(
+          seller_id,
+          order.id,
+          {
+            order_number: orderNumber,
+            product_title: product.title,
+            customer_name: `${product.first_name} ${product.last_name}`,
+            quantity: quantity,
+            total_price: total_price
+          }
+        );
+      } catch (notificationError) {
+        console.error('Failed to send new order notification to seller:', notificationError);
+        // Don't fail the request if notification fails
+      }
 
       res.status(201).json({
         success: true,
@@ -374,10 +393,25 @@ export const updateOrderStatus = async (req: Request, res: Response): Promise<vo
       return;
     }
 
+    const updatedOrder = result.rows[0];
+
+    // Send notification to customer about order status change
+    try {
+      await notificationService.createOrderStatusNotification(
+        updatedOrder.customer_id,
+        updatedOrder.id,
+        status,
+        { order_number: updatedOrder.order_number }
+      );
+    } catch (notificationError) {
+      console.error('Failed to send order status notification:', notificationError);
+      // Don't fail the request if notification fails
+    }
+
     res.json({
       success: true,
       message: 'Order status updated successfully',
-      data: result.rows[0]
+      data: updatedOrder
     });
 
   } catch (error) {
@@ -385,6 +419,169 @@ export const updateOrderStatus = async (req: Request, res: Response): Promise<vo
     res.status(500).json({
       success: false,
       message: 'Failed to update order status',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+};
+
+export const confirmOrderComplete = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const student_id = (req as any).user?.student_id;
+
+    if (!student_id) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      });
+      return;
+    }
+
+    // Get order details
+    const orderQuery = `
+      SELECT o.*, p.title as product_title
+      FROM orders o
+      JOIN products p ON o.product_id = p.id
+      WHERE o.id = $1
+    `;
+
+    const orderResult = await pool.query(orderQuery, [id]);
+
+    if (orderResult.rows.length === 0) {
+      res.status(404).json({
+        success: false,
+        message: 'Order not found'
+      });
+      return;
+    }
+
+    const order = orderResult.rows[0];
+
+    // Check if user is buyer or seller
+    if (order.customer_id !== student_id && order.seller_id !== student_id) {
+      res.status(403).json({
+        success: false,
+        message: 'You are not authorized to confirm completion for this order'
+      });
+      return;
+    }
+
+    // Check if order is in a state that allows completion confirmation
+    if (!['delivered', 'confirmed'].includes(order.status) && order.payment_status !== 'paid') {
+      res.status(400).json({
+        success: false,
+        message: 'Order must be delivered or paid before completion can be confirmed'
+      });
+      return;
+    }
+
+    // Determine which confirmation field to update
+    const isBuyer = order.customer_id === student_id;
+    const updateField = isBuyer ? 'buyer_confirmed_complete' : 'seller_confirmed_complete';
+    const otherField = isBuyer ? 'seller_confirmed_complete' : 'buyer_confirmed_complete';
+
+    // Check if already confirmed
+    if (order[updateField]) {
+      res.status(400).json({
+        success: false,
+        message: 'You have already confirmed completion for this order'
+      });
+      return;
+    }
+
+    // Update the confirmation field
+    const updateQuery = `
+      UPDATE orders
+      SET ${updateField} = TRUE, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+      RETURNING *
+    `;
+
+    const updateResult = await pool.query(updateQuery, [id]);
+    const updatedOrder = updateResult.rows[0];
+
+    // Check if both parties have confirmed completion
+    if (updatedOrder.buyer_confirmed_complete && updatedOrder.seller_confirmed_complete) {
+      // Mark order as fully completed
+      const completeQuery = `
+        UPDATE orders
+        SET status = 'completed', completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+        RETURNING *
+      `;
+
+      const completeResult = await pool.query(completeQuery, [id]);
+      const completedOrder = completeResult.rows[0];
+
+      // Send completion notification to both parties
+      try {
+        await notificationService.createOrderStatusNotification(
+          order.customer_id,
+          order.id,
+          'completed',
+          { order_number: order.order_number, product_title: order.product_title }
+        );
+        await notificationService.createOrderStatusNotification(
+          order.seller_id,
+          order.id,
+          'completed',
+          { order_number: order.order_number, product_title: order.product_title }
+        );
+      } catch (notificationError) {
+        console.error('Failed to send completion notifications:', notificationError);
+        // Don't fail the request if notification fails
+      }
+
+      res.json({
+        success: true,
+        message: 'Order completion confirmed by both parties. Order is now fully completed.',
+        data: {
+          order: completedOrder,
+          fully_completed: true
+        }
+      });
+    } else {
+      // Send notification to the other party that confirmation was received
+      const otherPartyId = isBuyer ? order.seller_id : order.customer_id;
+      const confirmerRole = isBuyer ? 'buyer' : 'seller';
+      try {
+        // Create a custom notification for partial confirmation
+        const notificationData = {
+          user_id: otherPartyId,
+          type: 'order',
+          title: 'Order Confirmation Update',
+          message: `The ${confirmerRole} has confirmed completion for order ${order.order_number}. Waiting for your confirmation.`,
+          data: {
+            order_id: order.id,
+            order_number: order.order_number,
+            product_title: order.product_title,
+            confirmer_role: confirmerRole
+          },
+          priority: 'high' as const,
+          delivery_methods: ['push']
+        };
+
+        await notificationService.createAndSend(notificationData);
+      } catch (notificationError) {
+        console.error('Failed to send confirmation notification:', notificationError);
+        // Don't fail the request if notification fails
+      }
+
+      res.json({
+        success: true,
+        message: `Order completion confirmed. Waiting for ${isBuyer ? 'seller' : 'buyer'} confirmation.`,
+        data: {
+          order: updatedOrder,
+          fully_completed: false
+        }
+      });
+    }
+
+  } catch (error) {
+    console.error('Error confirming order completion:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to confirm order completion',
       error: error instanceof Error ? error.message : 'Unknown error'
     });
   }
