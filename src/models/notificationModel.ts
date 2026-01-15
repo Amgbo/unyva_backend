@@ -102,7 +102,6 @@ export class NotificationModel {
     params.push(limit, offset);
 
     const result = await pool.query(query, params);
-
     // Get total count
     const countQuery = `
       SELECT COUNT(*) FROM notifications
@@ -111,8 +110,30 @@ export class NotificationModel {
     const countResult = await pool.query(countQuery, params.slice(0, -2));
     const total = parseInt(countResult.rows[0].count);
 
+    // Parse JSON data field and expose sender_profile at top-level if present
+    const notifications = result.rows.map((row: any) => {
+      let parsedData = row.data;
+      try {
+        if (typeof row.data === 'string' && row.data.length > 0) {
+          parsedData = JSON.parse(row.data);
+        }
+      } catch (e) {
+        parsedData = row.data;
+      }
+
+      // Attach parsed data
+      row.data = parsedData;
+
+      // If sender_profile exists in data, promote it to top-level for easier client consumption
+      if (parsedData && parsedData.sender_profile) {
+        row.sender_profile = parsedData.sender_profile;
+      }
+
+      return row;
+    });
+
     return {
-      notifications: result.rows,
+      notifications,
       total
     };
   }

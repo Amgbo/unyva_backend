@@ -35,14 +35,20 @@ export class FollowModel {
     return result.rows.length > 0;
   }
 
-  // Get followers of a user
+  // Get followers of a user with pagination
   static async getFollowers(userId: string, page: number = 1, limit: number = 20) {
     const offset = (page - 1) * limit;
+    const countQuery = `SELECT COUNT(*) as total FROM follows WHERE following_id = $1`;
+    const countResult = await pool.query(countQuery, [userId]);
+    const total = parseInt(countResult.rows[0].total);
+
     const query = `
       SELECT
         s.student_id,
-        CONCAT(s.first_name, ' ', s.last_name) as name,
-        s.profile_picture as avatar,
+        s.first_name,
+        s.last_name,
+        s.profile_picture,
+        s.hall_of_residence,
         f.created_at
       FROM follows f
       JOIN students s ON f.follower_id = s.student_id
@@ -51,17 +57,29 @@ export class FollowModel {
       LIMIT $2 OFFSET $3
     `;
     const result = await pool.query(query, [userId, limit, offset]);
-    return { followers: result.rows };
+    const hasMore = offset + limit < total;
+    
+    return { 
+      followers: result.rows,
+      total,
+      hasMore 
+    };
   }
 
-  // Get users that a user is following
+  // Get users that a user is following with pagination
   static async getFollowing(userId: string, page: number = 1, limit: number = 20) {
     const offset = (page - 1) * limit;
+    const countQuery = `SELECT COUNT(*) as total FROM follows WHERE follower_id = $1`;
+    const countResult = await pool.query(countQuery, [userId]);
+    const total = parseInt(countResult.rows[0].total);
+
     const query = `
       SELECT
         s.student_id,
-        CONCAT(s.first_name, ' ', s.last_name) as name,
-        s.profile_picture as avatar,
+        s.first_name,
+        s.last_name,
+        s.profile_picture,
+        s.hall_of_residence,
         f.created_at
       FROM follows f
       JOIN students s ON f.following_id = s.student_id
@@ -70,17 +88,29 @@ export class FollowModel {
       LIMIT $2 OFFSET $3
     `;
     const result = await pool.query(query, [userId, limit, offset]);
-    return { following: result.rows };
+    const hasMore = offset + limit < total;
+    
+    return { 
+      following: result.rows,
+      total,
+      hasMore 
+    };
   }
 
-  // Get follow stats for a user
-  static async getFollowStats(userId: string) {
+  // Get follow stats for a user (includes current user context when provided)
+  static async getFollowStats(userId: string, currentUserId?: string) {
     const query = `
       SELECT
         (SELECT COUNT(*) FROM follows WHERE following_id = $1) as followers_count,
-        (SELECT COUNT(*) FROM follows WHERE follower_id = $1) as following_count
+        (SELECT COUNT(*) FROM follows WHERE follower_id = $1) as following_count,
+        CASE WHEN $2::text IS NOT NULL THEN EXISTS(
+          SELECT 1 FROM follows WHERE follower_id = $2 AND following_id = $1
+        ) ELSE false END as is_following,
+        CASE WHEN $2::text IS NOT NULL THEN EXISTS(
+          SELECT 1 FROM follows WHERE follower_id = $1 AND following_id = $2
+        ) ELSE false END as is_followed_by
     `;
-    const result = await pool.query(query, [userId]);
+    const result = await pool.query(query, [userId, currentUserId || null]);
     return result.rows[0];
   }
 

@@ -47,13 +47,12 @@ router.put('/profile', authMiddleware, upload.any(), updateStudentProfile);
 
 // Delete account (protected)
 router.delete('/delete-account', authMiddleware, deleteAccount);
-
 // Follow routes
 router.post('/follow', authMiddleware, FollowController.followUser);
 router.post('/unfollow', authMiddleware, FollowController.unfollowUser);
 router.get('/:userId/following', FollowController.getFollowing);
 router.get('/:userId/followers', FollowController.getFollowers);
-router.get('/:userId/follow-stats', FollowController.getFollowStats);
+router.get('/:userId/follow-stats', authMiddleware, FollowController.getFollowStats);
 router.get('/:userId/is-following', authMiddleware, FollowController.isFollowing);
 router.get('/mutual-follows', authMiddleware, FollowController.getMutualFollows);
 router.get('/leaderboard/most-followed', FollowController.getMostFollowedLeaderboard);

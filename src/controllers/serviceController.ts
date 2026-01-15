@@ -228,11 +228,11 @@ export const createNewService = async (req: AuthRequest, res: Response): Promise
       return;
     }
 
-    // Validate price
-    if (serviceData.price <= 0 || serviceData.price > 10000) {
+    // Validate price (must be positive)
+    if (serviceData.price <= 0) {
       res.status(400).json({
         success: false,
-        error: 'Price must be between 0.01 and 10000'
+        error: 'Price must be greater than 0'
       });
       return;
     }

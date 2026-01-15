@@ -150,11 +150,11 @@ export const createNewProduct = async (req: AuthRequest, res: Response): Promise
       return;
     }
 
-    // Validate price
-    if (productData.price <= 0 || productData.price > 10000) {
+    // Validate price (must be positive)
+    if (productData.price <= 0) {
       res.status(400).json({
         success: false,
-        error: 'Price must be between 0.01 and 10000'
+        error: 'Price must be greater than 0'
       });
       return;
     }

@@ -40,6 +40,10 @@ export class FollowController {
         return res.status(401).json({ error: 'Unauthorized' });
       }
 
+      if (followerId === following_id) {
+        return res.status(400).json({ error: 'Cannot unfollow yourself' });
+      }
+
       const success = await FollowModel.unfollowUser(followerId, following_id);
 
       if (!success) {
@@ -101,12 +105,13 @@ export class FollowController {
     }
   }
 
-  // Get follow stats for a user
+  // Get follow stats for a user (with current user context if authenticated)
   static async getFollowStats(req: AuthRequest, res: Response) {
     try {
       const userId = req.params.userId;
+      const currentUserId = req.user?.student_id;
 
-      const stats = await FollowModel.getFollowStats(userId);
+      const stats = await FollowModel.getFollowStats(userId, currentUserId);
       res.json(stats);
     } catch (error) {
       console.error('Error fetching follow stats:', error);

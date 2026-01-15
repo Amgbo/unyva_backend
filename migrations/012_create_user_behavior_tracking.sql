@@ -13,6 +13,19 @@ CREATE TABLE IF NOT EXISTS product_views (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
+ALTER TABLE product_views
+ADD COLUMN session_id VARCHAR(255);
+
+ALTER TABLE product_views
+ADD COLUMN view_duration_seconds INTEGER DEFAULT 0;
+
+ALTER TABLE product_views
+ADD COLUMN device_info JSONB;
+
+ALTER TABLE product_views
+ADD COLUMN created_at TIMESTAMP DEFAULT NOW();
+
+
 -- Table to track search history
 CREATE TABLE IF NOT EXISTS search_history (
     id SERIAL PRIMARY KEY,
@@ -86,7 +99,7 @@ BEGIN
     -- Only insert if the order is confirmed/delivered
     IF NEW.status IN ('confirmed', 'delivered') THEN
         INSERT INTO purchase_history (student_id, product_id, order_id, quantity, price_at_purchase, purchased_at)
-        VALUES (NEW.customer_id, NEW.product_id, NEW.id, NEW.quantity, NEW.price, NEW.created_at)
+        VALUES (NEW.customer_id, NEW.product_id, NEW.id, NEW.quantity, NEW.unit_price, NEW.created_at)
         ON CONFLICT DO NOTHING; -- Prevent duplicates
     END IF;
     RETURN NEW;
@@ -97,3 +110,9 @@ CREATE TRIGGER trigger_populate_purchase_history
     AFTER INSERT OR UPDATE ON orders
     FOR EACH ROW
     EXECUTE FUNCTION populate_purchase_history();
+
+
+SELECT column_name
+FROM information_schema.columns
+WHERE table_name = 'product_views';
+	

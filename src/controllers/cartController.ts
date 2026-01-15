@@ -3,6 +3,7 @@ import { AuthRequest } from '../middleware/authMiddleware.js';
 import {
   getCartItems,
   addToCart,
+  clearAndAdd,
   removeCartItem,
   updateCartItemQuantity,
   getCartTotal
@@ -101,6 +102,23 @@ export const addItemToCart = async (req: AuthRequest, res: Response): Promise<vo
       return;
     }
 
+    // Check if cart has items from a different seller
+    const existingCartItems = await getCartItems(studentId);
+    if (existingCartItems.length > 0) {
+      const currentSellerId = existingCartItems[0].seller_student_id;
+      if (currentSellerId !== product.student_id) {
+        res.status(409).json({
+          success: false,
+          error: 'Your cart contains items from another seller. Please checkout or clear your cart first.',
+          code: 'DIFFERENT_SELLER',
+          existingSellerName: `${existingCartItems[0].first_name} ${existingCartItems[0].last_name}`.trim(),
+          existingSellerId: currentSellerId,
+          newSellerId: product.student_id
+        });
+        return;
+      }
+    }
+
     // Check if product is available or sold (allow sold products to be repurchased)
     if (product.status !== 'available' && product.status !== 'sold') {
       res.status(400).json({
@@ -136,6 +154,55 @@ export const addItemToCart = async (req: AuthRequest, res: Response): Promise<vo
       success: false,
       error: 'Failed to add item to cart'
     });
+  }
+};
+
+// POST: Clear existing cart and add a single item atomically
+export const clearAndAddItem = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const studentId = req.user?.student_id;
+    const { productId, quantity = 1 } = req.body;
+
+    if (!studentId) {
+      res.status(401).json({ success: false, error: 'User not authenticated' });
+      return;
+    }
+
+    if (!productId) {
+      res.status(400).json({ success: false, error: 'Product ID is required' });
+      return;
+    }
+
+    // Validate product exists
+    const product = await getProductById(productId);
+    if (!product) {
+      res.status(404).json({ success: false, error: 'Product not found' });
+      return;
+    }
+
+    // Prevent adding own product to cart
+    if (product.student_id === studentId) {
+      res.status(403).json({ success: false, error: 'You cannot add your own product to cart' });
+      return;
+    }
+
+    // Check availability
+    if (product.status !== 'available' && product.status !== 'sold') {
+      res.status(400).json({ success: false, error: 'Product is not available for purchase' });
+      return;
+    }
+
+    if (product.quantity !== undefined && product.quantity !== null && quantity > product.quantity) {
+      res.status(400).json({ success: false, error: `Only ${product.quantity} units available. Cannot add ${quantity} units to cart.` });
+      return;
+    }
+
+    const cartItem = await clearAndAdd(studentId, productId, quantity);
+
+    res.json({ success: true, message: 'Cart cleared and item added successfully', data: { id: cartItem.id, productId: cartItem.product_id, quantity: cartItem.quantity } });
+  } catch (error) {
+    console.error('❌ Error in clearAndAddItem:', error);
+    res.status(500).json({ success: false, error: 'Failed to clear and add item to cart' });
   }
 };
 

@@ -84,7 +84,9 @@ export class NotificationService {
         to: pushToken as ExpoPushToken,
         title: notification.title,
         body: notification.message,
-        data: notification.data || {},
+        data: (typeof notification.data === 'string' && notification.data.length > 0)
+          ? JSON.parse(notification.data)
+          : (notification.data || {}),
         priority: this.mapPriorityToExpo(notification.priority),
         ttl: 86400, // 24 hours
         expiration: Math.floor(Date.now() / 1000) + 86400, // 24 hours from now

@@ -214,6 +214,60 @@ export async function clearCart(studentId: string): Promise<boolean> {
   }
 }
 
+// Clear entire cart for student and add a single new item atomically
+export async function clearAndAdd(studentId: string, productId: number, quantity: number = 1): Promise<CartItem> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Clear existing cart items
+    await client.query('DELETE FROM cart WHERE student_id = $1', [studentId]);
+
+    // Insert new cart item
+    const insertQuery = `
+      INSERT INTO cart (student_id, product_id, quantity)
+      VALUES ($1, $2, $3)
+      RETURNING id, student_id, product_id, quantity, added_at
+    `;
+    const insertResult = await client.query(insertQuery, [studentId, productId, quantity]);
+    const cartItem = insertResult.rows[0];
+
+    // Get full item with product details
+    const fullItemQuery = `
+      SELECT
+        c.*,
+        p.id as product_id,
+        p.title,
+        p.price,
+        p.quantity as product_quantity,
+        p.student_id as seller_student_id,
+        s.first_name,
+        s.last_name,
+        COALESCE(
+          json_agg(
+            json_build_object('image_url', pi.image_url)
+          ) FILTER (WHERE pi.image_url IS NOT NULL),
+          '[]'
+        ) as images
+      FROM cart c
+      JOIN products p ON c.product_id = p.id
+      JOIN students s ON p.student_id = s.student_id
+      LEFT JOIN product_images pi ON p.id = pi.product_id AND pi.is_primary = true
+      WHERE c.id = $1
+      GROUP BY c.id, p.id, p.title, p.price, p.quantity, p.student_id, s.first_name, s.last_name, c.added_at
+    `;
+    const fullResult = await client.query(fullItemQuery, [cartItem.id]);
+    await client.query('COMMIT');
+    return fullResult.rows[0];
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error in clearAndAdd:', error);
+    throw new Error('Failed to clear and add item to cart');
+  } finally {
+    client.release();
+  }
+}
+
 // Get cart total for a student
 export async function getCartTotal(studentId: string): Promise<{ totalItems: number; totalPrice: number }> {
   try {

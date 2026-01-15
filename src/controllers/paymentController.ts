@@ -21,10 +21,14 @@ export const initializePayment = async (req: Request, res: Response): Promise<vo
     console.log(`📍 Initializing payment - student: ${student_id}, email: ${email}, amount: ${amount} pesewas`);
 
     // Initialize payment with Paystack
+    const baseUrl = process.env.BASE_URL || (process.env.NODE_ENV === 'production'
+      ? 'https://unyva.up.railway.app'
+      : 'http://localhost:5000');
+
     const response = await axios.post('https://api.paystack.co/transaction/initialize', {
       email,
       amount,
-      callback_url: `${process.env.BASE_URL || 'http://localhost:5000'}/api/payments/verify`,
+      callback_url: `${baseUrl}/payment-success`,
       metadata: {
         student_id,
       },

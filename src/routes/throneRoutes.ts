@@ -1,11 +1,11 @@
 import { Router } from 'express';
 import { ThroneController } from '../controllers/throneController.js';
-import { authenticateToken } from '../middleware/authMiddleware.js';
+import { authMiddleware } from '../middleware/authMiddleware.js';
 
 const router = Router();
 
 // All throne routes require authentication
-router.use(authenticateToken);
+router.use(authMiddleware);
 
 // Get current throne holders
 router.get('/current', ThroneController.getCurrentThroneHolders);

@@ -30,6 +30,7 @@ import messageRoutes from './routes/messageRoutes.js';
 import behaviorRoutes from './routes/behaviorRoutes.js';
 import recommendationRoutes from './routes/recommendationRoutes.js';
 import dealRoutes from './routes/dealRoutes.js';
+import throneRoutes from './routes/throneRoutes.js';
 
 // Initialize app
 const app = express();
@@ -138,8 +139,10 @@ app.use('/api/messages', messageRoutes);
 app.use('/api/behavior', behaviorRoutes);
 app.use('/api/recommendations', recommendationRoutes);
 app.use('/api/deals', dealRoutes);
+app.use('/api/thrones', throneRoutes);
 
 console.log('✅ Admin routes registered at /api/admin');
+console.log('✅ Throne routes registered at /api/thrones');
 console.log('✅ Delivery routes registered at /api/deliveries');
 console.log('✅ Order routes registered at /api/orders');
 console.log('✅ Review routes registered at /api/reviews');
@@ -160,6 +163,11 @@ app.get('/delete-account.html', (_: Request, res: Response) => {
 // Serve privacy policy HTML page
 app.get('/privacy-policy.html', (_: Request, res: Response) => {
   res.sendFile(path.join(__dirname, '../web-payment/privacy-policy.html'));
+});
+
+// Serve payment success page
+app.get('/payment-success', (_: Request, res: Response) => {
+  res.sendFile(path.join(__dirname, '../web-payment/payment-success.html'));
 });
 
 // Test route

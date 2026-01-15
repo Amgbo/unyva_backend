@@ -80,7 +80,9 @@ export const createOrder = async (req: Request, res: Response): Promise<void> =>
     const product = productResult.rows[0];
     const seller_id = product.seller_id;
     const unit_price = product.price;
-    const total_price = (unit_price * quantity) + (delivery_fee || 0);
+    // Set delivery fee to constant 5.00 Ghana Cedis for all delivery orders
+    const final_delivery_fee = delivery_option === 'delivery' ? 5.00 : 0;
+    const total_price = (unit_price * quantity) + final_delivery_fee;
 
     // Generate unique order number
     const orderNumber = `ORD-${Date.now()}-${Math.random().toString(36).substr(2, 5).toUpperCase()}`;
@@ -136,7 +138,7 @@ export const createOrder = async (req: Request, res: Response): Promise<void> =>
 
         const deliveryValues = [
           order.id, customer_id, seller_id, product.seller_hall_id, product.seller_room_number,
-          delivery_hall_id, delivery_room_number, delivery_fee || 0, 'pending',
+          delivery_hall_id, delivery_room_number, final_delivery_fee, 'pending',
           special_instructions || 'Delivery request created'
         ];
 
@@ -175,15 +177,26 @@ export const createOrder = async (req: Request, res: Response): Promise<void> =>
 
       // Send notification to seller about new order
       try {
+        // Include buyer profile in notification data so frontend can display their avatar
+        const buyer = (req as any).user || {};
         await notificationService.createNewOrderNotification(
           seller_id,
           order.id,
           {
             order_number: orderNumber,
             product_title: product.title,
-            customer_name: `${product.first_name} ${product.last_name}`,
+            customer_name: `${buyer.first_name || ''} ${buyer.last_name || ''}`.trim(),
             quantity: quantity,
-            total_price: total_price
+            total_price: total_price,
+            sender_profile: {
+              id: buyer.student_id || customer_id,
+              first_name: buyer.first_name || '',
+              last_name: buyer.last_name || '',
+              profile_picture: buyer.profile_picture || null,
+              hall_of_residence: buyer.hall_of_residence || null,
+              room_number: buyer.room_number || null,
+              program: buyer.program || null
+            }
           }
         );
       } catch (notificationError) {
@@ -480,8 +493,11 @@ export const confirmOrderComplete = async (req: Request, res: Response): Promise
     const updateField = isBuyer ? 'buyer_confirmed_complete' : 'seller_confirmed_complete';
     const otherField = isBuyer ? 'seller_confirmed_complete' : 'buyer_confirmed_complete';
 
+    // Normalize boolean-like values from DB (can be true/false or 't'/'f' strings)
+    const normalizeBool = (v: any) => v === true || v === 't' || v === 'true' || v === '1';
+
     // Check if already confirmed
-    if (order[updateField]) {
+    if (normalizeBool(order[updateField])) {
       res.status(400).json({
         success: false,
         message: 'You have already confirmed completion for this order'
@@ -500,8 +516,11 @@ export const confirmOrderComplete = async (req: Request, res: Response): Promise
     const updateResult = await pool.query(updateQuery, [id]);
     const updatedOrder = updateResult.rows[0];
 
-    // Check if both parties have confirmed completion
-    if (updatedOrder.buyer_confirmed_complete && updatedOrder.seller_confirmed_complete) {
+    // Check if both parties have confirmed completion (normalize DB boolean values)
+    const buyerConfirmed = normalizeBool(updatedOrder.buyer_confirmed_complete);
+    const sellerConfirmed = normalizeBool(updatedOrder.seller_confirmed_complete);
+
+    if (buyerConfirmed && sellerConfirmed) {
       // Mark order as fully completed
       const completeQuery = `
         UPDATE orders

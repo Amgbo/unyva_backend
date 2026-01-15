@@ -82,6 +82,10 @@ export const sendProductMessage = async (req: AuthRequest, res: Response): Promi
           s.student_id as sender_student_id,
           s.first_name,
           s.last_name,
+          s.profile_picture,
+          s.hall_of_residence,
+          s.room_number,
+          s.program,
           p.title as product_title,
           r.student_id as receiver_student_id
         FROM students s
@@ -122,7 +126,16 @@ export const sendProductMessage = async (req: AuthRequest, res: Response): Promi
             product_id: parseInt(product_id, 10),
             sender_id: senderId,
             message_id: newMessage.id,
-            product_title: product_title
+            product_title: product_title,
+            sender_profile: {
+              id: userResult.rows[0].sender_student_id,
+              first_name: userResult.rows[0].first_name,
+              last_name: userResult.rows[0].last_name,
+              profile_picture: userResult.rows[0].profile_picture,
+              hall_of_residence: userResult.rows[0].hall_of_residence,
+              room_number: userResult.rows[0].room_number,
+              program: userResult.rows[0].program
+            }
           },
           priority: 'medium',
           delivery_methods: ['push']
@@ -183,12 +196,13 @@ export const getProductMessages = async (req: AuthRequest, res: Response): Promi
       return;
     }
 
-    // Check if user is the seller or has messaged this product
+    // Check if user is the seller or has messaged this product, or is trying to message for the first time
     const accessQuery = `
       SELECT 1 FROM products p
       LEFT JOIN product_messages pm ON p.id = pm.product_id
       WHERE p.id = $1 AND (p.student_id = $2
-        OR pm.sender_id = $2 OR pm.receiver_id = $2)
+        OR pm.sender_id = $2 OR pm.receiver_id = $2
+        OR p.student_id != $2)  -- Allow any authenticated user to start messaging any product they don't own
       LIMIT 1
     `;
     const accessResult = await pool.query(accessQuery, [productIdNum, userId]);
@@ -196,7 +210,7 @@ export const getProductMessages = async (req: AuthRequest, res: Response): Promi
     if (accessResult.rows.length === 0) {
       res.status(403).json({
         success: false,
-        error: 'Access denied: You can only view messages for products you own or have messaged'
+        error: 'Access denied: You cannot message your own product'
       });
       return;
     }
@@ -247,6 +261,46 @@ export const getSellerInboxController = async (req: AuthRequest, res: Response):
     res.status(500).json({
       success: false,
       error: 'Failed to fetch inbox',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+};
+
+// POST /api/messages/mark-read/:productId - Mark messages as read for a product
+export const markMessagesAsReadController = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    const { productId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({
+        success: false,
+        error: 'Unauthorized: No user ID found in token'
+      });
+      return;
+    }
+
+    const productIdNum = parseInt(productId, 10);
+    if (isNaN(productIdNum)) {
+      res.status(400).json({
+        success: false,
+        error: 'Invalid product ID'
+      });
+      return;
+    }
+
+    // Mark messages as read using the imported function
+    await markMessagesAsRead(productIdNum, userId);
+
+    res.status(200).json({
+      success: true,
+      message: 'Messages marked as read'
+    });
+  } catch (error) {
+    console.error('❌ Error marking messages as read:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to mark messages as read',
       message: error instanceof Error ? error.message : 'Unknown error'
     });
   }

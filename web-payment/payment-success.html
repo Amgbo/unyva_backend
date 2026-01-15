@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payment Success - Unyva</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #333;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            max-width: 500px;
+            width: 90%;
+        }
+
+        .success-icon {
+            width: 80px;
+            height: 80px;
+            background: #10b981;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 24px;
+            font-size: 36px;
+        }
+
+        h1 {
+            color: #1f2937;
+            margin-bottom: 16px;
+            font-size: 28px;
+            font-weight: 700;
+        }
+
+        .message {
+            color: #6b7280;
+            margin-bottom: 32px;
+            line-height: 1.6;
+            font-size: 16px;
+        }
+
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 20px 0;
+        }
+
+        .spinner {
+            width: 24px;
+            height: 24px;
+            border: 3px solid #f3f4f6;
+            border-top: 3px solid #3b82f6;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 12px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .button {
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+            color: white;
+            border: none;
+            padding: 16px 32px;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(59, 130, 246, 0.3);
+        }
+
+        .error {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            color: #dc2626;
+            padding: 16px;
+            border-radius: 12px;
+            margin-bottom: 24px;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="loading-section">
+            <div class="success-icon">✓</div>
+            <h1>Payment Successful!</h1>
+            <p class="message">Verifying your payment...</p>
+            <div class="loading">
+                <div class="spinner"></div>
+                <span>Please wait...</span>
+            </div>
+        </div>
+
+        <div id="success-section" class="hidden">
+            <div class="success-icon">✓</div>
+            <h1>Payment Verified!</h1>
+            <p class="message">Your payment has been successfully verified. You can now continue using the app.</p>
+            <a href="unyva://home" class="button">Continue to App</a>
+        </div>
+
+        <div id="error-section" class="hidden">
+            <div class="error">
+                <h2>Verification Failed</h2>
+                <p id="error-message">There was an issue verifying your payment. Please contact support.</p>
+            </div>
+            <a href="unyva://PaymentScreen" class="button">Try Again</a>
+        </div>
+    </div>
+
+    <script>
+        // Get URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const reference = urlParams.get('reference');
+        const trxref = urlParams.get('trxref');
+
+        // Use the reference from URL params or fallback to trxref
+        const paymentReference = reference || trxref;
+
+        if (!paymentReference) {
+            showError('Payment reference not found. Please contact support.');
+            return;
+        }
+
+        // Get student_id from localStorage or URL params
+        let studentId = urlParams.get('student_id') || localStorage.getItem('student_id');
+
+        if (!studentId) {
+            // Try to get from other possible sources
+            const userData = localStorage.getItem('user_data');
+            if (userData) {
+                try {
+                    const user = JSON.parse(userData);
+                    studentId = user.student_id;
+                } catch (e) {
+                    console.error('Error parsing user data:', e);
+                }
+            }
+        }
+
+        if (!studentId) {
+            showError('Student ID not found. Please log in again.');
+            return;
+        }
+
+        // Verify payment with backend
+        verifyPayment(paymentReference, studentId);
+
+        async function verifyPayment(reference, studentId) {
+            try {
+                // Get API URL from current location or use environment-based URL
+                const currentHost = window.location.hostname;
+                const API_URL = currentHost === 'localhost' || currentHost.includes('127.0.0.1')
+                    ? 'http://localhost:5000'
+                    : `https://${currentHost}`;
+
+                const response = await fetch(`${API_URL}/api/payments/verify`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        // Include auth token if available
+                        'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+                    },
+                    body: JSON.stringify({
+                        reference: reference,
+                        student_id: studentId
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showSuccess();
+                } else {
+                    showError(data.message || 'Payment verification failed');
+                }
+            } catch (error) {
+                console.error('Verification error:', error);
+                showError('Network error. Please check your connection and try again.');
+            }
+        }
+
+        function showSuccess() {
+            document.getElementById('loading-section').classList.add('hidden');
+            document.getElementById('success-section').classList.remove('hidden');
+            document.getElementById('error-section').classList.add('hidden');
+        }
+
+        function showError(message) {
+            document.getElementById('loading-section').classList.add('hidden');
+            document.getElementById('success-section').classList.add('hidden');
+            document.getElementById('error-section').classList.remove('hidden');
+            document.getElementById('error-message').textContent = message;
+        }
+
+        // Auto-redirect to app after 3 seconds on success
+        setTimeout(() => {
+            if (!document.getElementById('success-section').classList.contains('hidden')) {
+                window.location.href = 'unyva://home';
+            }
+        }, 3000);
+    </script>
+</body>
+</html>

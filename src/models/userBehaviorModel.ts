@@ -314,7 +314,7 @@ export const getPersonalizedRecommendations = async (
       FROM product_views pv
       JOIN products p ON pv.product_id = p.id
       WHERE pv.student_id = $1 AND p.category IS NOT NULL AND trim(p.category::text) != ''
-      GROUP BY p.category
+      GROUP BY p.category::text
 
       UNION ALL
 
@@ -325,7 +325,7 @@ export const getPersonalizedRecommendations = async (
       FROM purchase_history ph
       JOIN products p ON ph.product_id = p.id
       WHERE ph.student_id = $1 AND p.category IS NOT NULL AND trim(p.category::text) != ''
-      GROUP BY p.category
+      GROUP BY p.category::text
 
       UNION ALL
 
@@ -336,7 +336,7 @@ export const getPersonalizedRecommendations = async (
       FROM service_views sv
       JOIN services s ON sv.service_id = s.id
       WHERE sv.student_id = $1 AND s.category IS NOT NULL AND trim(s.category::text) != ''
-      GROUP BY s.category
+      GROUP BY s.category::text
 
       UNION ALL
 
@@ -348,7 +348,7 @@ export const getPersonalizedRecommendations = async (
       JOIN services s ON ui.service_id = s.id
       WHERE ui.student_id = $1 AND ui.interaction_type IN ('like', 'favorite', 'cart_add')
         AND s.category IS NOT NULL AND trim(s.category::text) != ''
-      GROUP BY s.category
+      GROUP BY s.category::text
 
       ORDER BY score DESC
       LIMIT 5
@@ -367,7 +367,27 @@ export const getPersonalizedRecommendations = async (
 
     if (preferredCategories.length > 0) {
       productQuery = `
-        SELECT DISTINCT p.*,
+        SELECT p.id,
+               p.student_id,
+               p.title,
+               p.price,
+               p.description,
+               p.category,
+               p.condition,
+               p.contact_method,
+               p.hall_id,
+               p.room_number,
+               p.status,
+               p.is_approved,
+               p.view_count,
+               p.price_negotiable,
+               p.tags,
+               p.quantity,
+               p.created_at,
+               p.updated_at,
+               p.last_bumped_at,
+               p.rating,
+               p.review_count,
                h.full_name as hall_name,
                s.first_name || ' ' || s.last_name as student_name,
                COALESCE(
@@ -381,11 +401,11 @@ export const getPersonalizedRecommendations = async (
                      'upload_order', pi.upload_order
                    )
                  ) FILTER (WHERE pi.id IS NOT NULL),
-                 '[]'
+                 '[]'::json
                ) as images,
                -- Calculate recommendation score
                (
-            CASE WHEN p.category = ANY($3::text[]) THEN 3 ELSE 0 END +
+                 CASE WHEN p.category = ANY($3::text[]) THEN 3 ELSE 0 END +
                  (p.view_count * 0.1) +
                  EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - p.last_bumped_at)) * (-0.01)
                ) as recommendation_score
@@ -397,7 +417,7 @@ export const getPersonalizedRecommendations = async (
           AND p.is_approved = true
           AND p.quantity > 0
           AND p.student_id != $1
-        GROUP BY p.id, h.full_name, s.first_name, s.last_name
+        GROUP BY p.id, p.student_id, p.title, p.price, p.description, p.category, p.condition, p.contact_method, p.hall_id, p.room_number, p.status, p.is_approved, p.view_count, p.price_negotiable, p.tags, p.quantity, p.created_at, p.updated_at, p.last_bumped_at, p.rating, p.review_count, h.full_name, s.first_name, s.last_name
         ORDER BY recommendation_score DESC, p.last_bumped_at DESC
         LIMIT $2
       `;
@@ -405,7 +425,27 @@ export const getPersonalizedRecommendations = async (
     } else {
       // Fallback to general popular products
       productQuery = `
-        SELECT DISTINCT p.*,
+        SELECT p.id,
+               p.student_id,
+               p.title,
+               p.price,
+               p.description,
+               p.category,
+               p.condition,
+               p.contact_method,
+               p.hall_id,
+               p.room_number,
+               p.status,
+               p.is_approved,
+               p.view_count,
+               p.price_negotiable,
+               p.tags,
+               p.quantity,
+               p.created_at,
+               p.updated_at,
+               p.last_bumped_at,
+               p.rating,
+               p.review_count,
                h.full_name as hall_name,
                s.first_name || ' ' || s.last_name as student_name,
                COALESCE(
@@ -419,7 +459,7 @@ export const getPersonalizedRecommendations = async (
                      'upload_order', pi.upload_order
                    )
                  ) FILTER (WHERE pi.id IS NOT NULL),
-                 '[]'
+                 '[]'::json
                ) as images,
                (p.view_count * 0.1 + EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - p.last_bumped_at)) * (-0.01)) as recommendation_score
         FROM products p
@@ -430,7 +470,7 @@ export const getPersonalizedRecommendations = async (
           AND p.is_approved = true
           AND p.quantity > 0
           AND p.student_id != $1
-        GROUP BY p.id, h.full_name, s.first_name, s.last_name
+        GROUP BY p.id, p.student_id, p.title, p.price, p.description, p.category, p.condition, p.contact_method, p.hall_id, p.room_number, p.status, p.is_approved, p.view_count, p.price_negotiable, p.tags, p.quantity, p.created_at, p.updated_at, p.last_bumped_at, p.rating, p.review_count, h.full_name, s.first_name, s.last_name
         ORDER BY recommendation_score DESC, p.last_bumped_at DESC
         LIMIT $2
       `;
@@ -442,11 +482,21 @@ export const getPersonalizedRecommendations = async (
 
     if (preferredCategories.length > 0) {
       serviceQuery = `
-        SELECT DISTINCT s.*,
+        SELECT s.id,
+               s.student_id,
+               s.title,
+               s.description,
+               s.category,
+               s.price,
+               s.status,
+               s.is_approved,
+               s.view_count,
+               s.created_at,
+               s.updated_at,
                st.first_name || ' ' || st.last_name as provider_name,
                -- Calculate recommendation score
                (
-            CASE WHEN s.category = ANY($3::text[]) THEN 3 ELSE 0 END +
+                 CASE WHEN s.category = ANY($3::text[]) THEN 3 ELSE 0 END +
                  (s.view_count * 0.1) +
                  EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - s.created_at)) * (-0.01)
                ) as recommendation_score
@@ -462,7 +512,17 @@ export const getPersonalizedRecommendations = async (
     } else {
       // Fallback to general popular services
       serviceQuery = `
-        SELECT DISTINCT s.*,
+        SELECT s.id,
+               s.student_id,
+               s.title,
+               s.description,
+               s.category,
+               s.price,
+               s.status,
+               s.is_approved,
+               s.view_count,
+               s.created_at,
+               s.updated_at,
                st.first_name || ' ' || st.last_name as provider_name,
                (s.view_count * 0.1 + EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - s.created_at)) * (-0.01)) as recommendation_score
         FROM services s

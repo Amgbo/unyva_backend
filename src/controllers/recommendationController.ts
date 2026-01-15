@@ -82,7 +82,7 @@ export const getRelatedItems = async (req: Request, res: Response) => {
 
       // Get related services from same category
       relatedQuery = await pool.query(
-        'SELECT * FROM services WHERE category = $1 AND id != $2 AND is_active = true ORDER BY rating DESC LIMIT $3',
+        'SELECT * FROM services WHERE category = $1 AND id != $2 AND status IN (\'available\', \'reserved\') AND is_approved = true ORDER BY rating DESC LIMIT $3',
         [category, itemId, limit]
       );
     } else {
