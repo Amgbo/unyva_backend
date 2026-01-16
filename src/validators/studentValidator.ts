@@ -72,12 +72,10 @@ export const registerStep1Schema = z.object({
   // Delivery code (completely optional in base schema)
   delivery_code: z.string().optional().or(z.literal('')),
   
-  // Academic information (optional)
+  // Academic information (university is required, others optional)
   university: z.string()
     .min(2, 'University name must be at least 2 characters')
-    .max(255, 'University name too long')
-    .optional()
-    .or(z.literal('')),
+    .max(255, 'University name too long'),
   program: z.string()
     .min(2, 'Program name must be at least 2 characters')
     .max(255, 'Program name too long')

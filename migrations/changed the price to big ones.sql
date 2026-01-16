@@ -7,5 +7,5 @@ ALTER TABLE products
 ALTER TABLE services
   DROP CONSTRAINT IF EXISTS services_price_check,
   ADD CONSTRAINT services_price_check CHECK (price >= 0);
-
+ 
 COMMIT;

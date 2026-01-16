@@ -1,4 +1,4 @@
--- Create follows table for followers & following system
+-- DROP TABLE IF EXISTS follows;
 
 CREATE TABLE follows (
     id SERIAL PRIMARY KEY,
@@ -10,6 +10,7 @@ CREATE TABLE follows (
     CONSTRAINT follows_no_self_follow CHECK (follower_id != following_id),
     CONSTRAINT follows_unique_pair UNIQUE (follower_id, following_id)
 );
+
 
 -- Indexes for performance
 CREATE INDEX idx_follows_follower_id ON follows(follower_id);
