@@ -31,6 +31,7 @@ import behaviorRoutes from './routes/behaviorRoutes.js';
 import recommendationRoutes from './routes/recommendationRoutes.js';
 import dealRoutes from './routes/dealRoutes.js';
 import throneRoutes from './routes/throneRoutes.js';
+import leaderboardRoutes from './routes/leaderboardRoutes.js';
 
 // Initialize app
 const app = express();
@@ -140,9 +141,11 @@ app.use('/api/behavior', behaviorRoutes);
 app.use('/api/recommendations', recommendationRoutes);
 app.use('/api/deals', dealRoutes);
 app.use('/api/thrones', throneRoutes);
+app.use('/api/leaderboard', leaderboardRoutes);
 
 console.log('✅ Admin routes registered at /api/admin');
 console.log('✅ Throne routes registered at /api/thrones');
+console.log('✅ Leaderboard routes registered at /api/leaderboard');
 console.log('✅ Delivery routes registered at /api/deliveries');
 console.log('✅ Order routes registered at /api/orders');
 console.log('✅ Review routes registered at /api/reviews');

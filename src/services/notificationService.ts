@@ -95,11 +95,14 @@ export class NotificationService {
       // Send the notification
       const ticket = await this.expo.sendPushNotificationsAsync([message]);
 
+      console.log(`📤 Push notification ticket for user ${notification.user_id}:`, ticket[0]);
+
       if (ticket[0].status === 'error') {
+        console.error(`❌ Push notification failed for user ${notification.user_id}:`, ticket[0].message);
         throw new Error(`Push notification failed: ${ticket[0].message}`);
       }
 
-      console.log(`Push notification sent successfully to user ${notification.user_id}`);
+      console.log(`✅ Push notification sent successfully to user ${notification.user_id}`);
 
     } catch (error) {
       console.error('Error sending push notification:', error);

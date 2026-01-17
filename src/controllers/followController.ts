@@ -209,7 +209,7 @@ export class FollowController {
     }
   }
 
-  // Get highest rated sellers leaderboard
+  // Get highest rated sellers leaderboard (combines product, service, and seller reviews)
   static async getHighestRatedLeaderboard(req: AuthRequest, res: Response) {
     try {
       const limit = parseInt(req.query.limit as string) || 10;
@@ -217,24 +217,53 @@ export class FollowController {
 
       let dateFilter = '';
       if (period === 'week') {
-        dateFilter = 'AND sr.created_at >= NOW() - INTERVAL \'7 days\'';
+        dateFilter = 'AND (pr.created_at >= NOW() - INTERVAL \'7 days\' OR sr.created_at >= NOW() - INTERVAL \'7 days\' OR svr.created_at >= NOW() - INTERVAL \'7 days\')';
       } else if (period === 'month') {
-        dateFilter = 'AND sr.created_at >= NOW() - INTERVAL \'30 days\'';
+        dateFilter = 'AND (pr.created_at >= NOW() - INTERVAL \'30 days\' OR sr.created_at >= NOW() - INTERVAL \'30 days\' OR svr.created_at >= NOW() - INTERVAL \'30 days\')';
       }
 
       const query = `
+        WITH combined_ratings AS (
+          -- Product reviews (reviews table)
+          SELECT
+            p.seller_id as student_id,
+            pr.rating,
+            pr.created_at
+          FROM products p
+          JOIN reviews pr ON p.id = pr.product_id
+
+          UNION ALL
+
+          -- Service reviews (service_reviews table)
+          SELECT
+            sv.provider_id as student_id,
+            svr.rating,
+            svr.created_at
+          FROM services sv
+          JOIN service_reviews svr ON sv.id = svr.service_id
+
+          UNION ALL
+
+          -- Seller reviews (seller_reviews table)
+          SELECT
+            sr.seller_id as student_id,
+            sr.rating,
+            sr.created_at
+          FROM seller_reviews sr
+        )
         SELECT
           s.student_id,
           CONCAT(s.first_name, ' ', s.last_name) as name,
           s.profile_picture as avatar,
-          ROUND(AVG(sr.rating), 1) as score,
-          ROW_NUMBER() OVER (ORDER BY AVG(sr.rating) DESC) as rank
+          ROUND(AVG(cr.rating), 1) as score,
+          COUNT(cr.rating) as total_reviews,
+          ROW_NUMBER() OVER (ORDER BY AVG(cr.rating) DESC, COUNT(cr.rating) DESC) as rank
         FROM students s
-        JOIN seller_reviews sr ON s.student_id = sr.seller_id
+        JOIN combined_ratings cr ON s.student_id = cr.student_id
         WHERE 1=1 ${dateFilter}
         GROUP BY s.student_id, s.first_name, s.last_name, s.profile_picture
-        HAVING COUNT(sr.id) >= 3
-        ORDER BY AVG(sr.rating) DESC
+        HAVING COUNT(cr.rating) >= 3
+        ORDER BY AVG(cr.rating) DESC, COUNT(cr.rating) DESC
         LIMIT $1
       `;
 
@@ -242,6 +271,32 @@ export class FollowController {
       res.json({ leaderboard: result.rows });
     } catch (error) {
       console.error('Error fetching highest rated leaderboard:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+
+  // Get highest rated service providers leaderboard
+  static async getServiceProvidersLeaderboard(req: AuthRequest, res: Response) {
+    try {
+      const limit = parseInt(req.query.limit as string) || 10;
+
+      const query = `
+        SELECT
+          s.student_id,
+          CONCAT(s.first_name, ' ', s.last_name) as name,
+          s.profile_picture as avatar,
+          s.service_provider_rating as score,
+          ROW_NUMBER() OVER (ORDER BY s.service_provider_rating DESC) as rank
+        FROM students s
+        WHERE s.service_provider_rating > 0
+        ORDER BY s.service_provider_rating DESC
+        LIMIT $1
+      `;
+
+      const result = await pool.query(query, [limit]);
+      res.json({ leaderboard: result.rows });
+    } catch (error) {
+      console.error('Error fetching service providers leaderboard:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   }

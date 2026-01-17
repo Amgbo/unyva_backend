@@ -115,27 +115,34 @@ export const registerToken = registerPushToken;
 export const createTestNotification = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.student_id;
+    const { title = 'Test Notification', message = 'This is a test notification', priority = 'medium' } = req.body;
+
+    console.log(`🧪 Creating test notification for user ${userId}:`, { title, message, priority });
 
     const notificationData = {
       user_id: userId,
       type: 'test',
-      title: 'Test Notification',
-      message: 'This is a test notification',
-      priority: 'low' as 'low' | 'medium' | 'high',
+      title,
+      message,
+      priority: priority as 'low' | 'medium' | 'high',
       delivery_methods: ['push'],
     };
 
     const notification = await notificationService.createAndSend(notificationData);
 
+    console.log(`✅ Test notification created successfully for user ${userId}`);
+
     res.json({
       success: true,
       notification,
+      message: 'Test notification sent. Check your device for the notification.',
     });
   } catch (error) {
-    console.error('Error creating test notification:', error);
+    console.error('❌ Error creating test notification:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to create test notification',
+      error: error instanceof Error ? error.message : 'Unknown error',
     });
   }
 };
