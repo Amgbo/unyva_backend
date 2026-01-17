@@ -176,7 +176,7 @@ export const updateReview = async (req: AuthRequest, res: Response): Promise<voi
 export const deleteReview = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const studentId = req.user?.student_id;
-    const { reviewId } = req.params;
+    const { id: reviewId } = req.params;
     const reviewIdNum = parseInt(reviewId, 10);
 
     if (!studentId) {

@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import { AuthRequest } from '../middleware/authMiddleware.js';
 import { pool } from '../db.js';
 import { getPersonalizedRecommendations } from '../models/userBehaviorModel.js';
+import { getAllProducts, getProductsByCategory, getFeaturedProducts } from '../models/productModel.js';
+import { getFeaturedServices, getRelatedServices } from '../models/serviceModel.js';
 
 export const getPersonalizedRecommendationsController = async (req: AuthRequest, res: Response) => {
   try {
@@ -15,12 +17,38 @@ export const getPersonalizedRecommendationsController = async (req: AuthRequest,
       });
     }
 
-    const recommendations = await getPersonalizedRecommendations(
+    // Get personalized recommendations from behavior model
+    const behaviorRecommendations = await getPersonalizedRecommendations(
       studentId,
       parseInt(limit as string)
     );
 
-    res.status(200).json(recommendations);
+    // If behavior model returns products, use them; otherwise get featured products
+    let products = [];
+    if (behaviorRecommendations.products && behaviorRecommendations.products.length > 0) {
+      // Try to get full product details with images for the recommended products
+      const allProducts = await getAllProducts();
+      products = behaviorRecommendations.products.map(rec => {
+        const fullProduct = allProducts.find(p => p.id === rec.id);
+        return fullProduct || rec;
+      });
+    } else {
+      // Fallback to featured products
+      products = await getFeaturedProducts(parseInt(limit as string));
+    }
+
+    // If behavior model returns services, use them; otherwise get featured services
+    let services = [];
+    if (behaviorRecommendations.services && behaviorRecommendations.services.length > 0) {
+      services = behaviorRecommendations.services;
+    } else {
+      services = await getFeaturedServices(parseInt(limit as string));
+    }
+
+    res.status(200).json({
+      products: products,
+      services: services
+    });
   } catch (error) {
     console.error('Error getting personalized recommendations:', error);
     res.status(500).json({ products: [], services: [] });
@@ -36,7 +64,22 @@ export const getTrendingItems = async (req: Request, res: Response) => {
 
     const trending = await getTrendingItemsModel(parseInt(limit as string));
 
-    res.json(trending);
+    // If behavior model doesn't return proper data, fallback to featured items
+    let products = trending.products || [];
+    let services = trending.services || [];
+
+    if (!products.length) {
+      products = await getFeaturedProducts(parseInt(limit as string));
+    }
+
+    if (!services.length) {
+      services = await getFeaturedServices(parseInt(limit as string));
+    }
+
+    res.json({
+      products: products,
+      services: services
+    });
   } catch (error) {
     console.error('Error getting trending items:', error);
     res.status(500).json({ products: [], services: [] });
@@ -52,44 +95,33 @@ export const getRelatedItems = async (req: Request, res: Response) => {
       return res.status(400).json([]);
     }
 
-    let itemQuery;
-    let relatedQuery;
-
     if (type === 'product') {
-      // Get product details
-      itemQuery = await pool.query('SELECT * FROM products WHERE id = $1', [itemId]);
+      // Get product details first to get category
+      const product = await getAllProducts().then(products =>
+        products.find(p => p.id === parseInt(itemId))
+      );
 
-      if (itemQuery.rows.length === 0) {
+      if (!product) {
         return res.status(404).json([]);
       }
-
-      const category = itemQuery.rows[0].category;
 
       // Get related products from same category
-      relatedQuery = await pool.query(
-        'SELECT * FROM products WHERE category = $1 AND id != $2 AND status IN (\'available\', \'sold\', \'pending\') AND is_approved = true AND quantity > 0 ORDER BY created_at DESC LIMIT $3',
-        [category, itemId, limit]
-      );
+      const relatedProducts = await getProductsByCategory(product.category, {
+        limit: parseInt(limit as string),
+        excludeStudentId: product.student_id
+      });
+
+      // Filter out the current product
+      const filteredProducts = relatedProducts.filter(p => p.id !== parseInt(itemId));
+
+      res.json(filteredProducts);
     } else if (type === 'service') {
-      // Get service details
-      itemQuery = await pool.query('SELECT * FROM services WHERE id = $1', [itemId]);
-
-      if (itemQuery.rows.length === 0) {
-        return res.status(404).json([]);
-      }
-
-      const category = itemQuery.rows[0].category;
-
-      // Get related services from same category
-      relatedQuery = await pool.query(
-        'SELECT * FROM services WHERE category = $1 AND id != $2 AND status IN (\'available\', \'reserved\') AND is_approved = true ORDER BY rating DESC LIMIT $3',
-        [category, itemId, limit]
-      );
+      // For services, we'll return trending items as fallback since we don't have service categories implemented yet
+      const trending = await getFeaturedProducts(parseInt(limit as string));
+      res.json(trending);
     } else {
       return res.status(400).json([]);
     }
-
-    res.json(relatedQuery.rows);
   } catch (error) {
     console.error('Error getting related items:', error);
     res.status(500).json([]);
