@@ -493,6 +493,7 @@ export const getPersonalizedRecommendations = async (
                s.view_count,
                s.created_at,
                s.updated_at,
+               s.image_urls,
                st.first_name || ' ' || st.last_name as provider_name,
                -- Calculate recommendation score
                (
@@ -523,6 +524,7 @@ export const getPersonalizedRecommendations = async (
                s.view_count,
                s.created_at,
                s.updated_at,
+               s.image_urls,
                st.first_name || ' ' || st.last_name as provider_name,
                (s.view_count * 0.1 + EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - s.created_at)) * (-0.01)) as recommendation_score
         FROM services s
