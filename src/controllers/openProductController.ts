@@ -1,6 +1,10 @@
 import { Request, Response } from 'express';
+import { getProductById } from '../models/productModel.js';
 
-export const openProduct = (req: Request, res: Response): void => {
+// Production API URL for constructing full image URLs
+const API_BASE_URL = 'https://unyva.up.railway.app';
+
+export const openProduct = async (req: Request, res: Response): Promise<void> => {
   const { id } = req.query;
 
   if (!id || typeof id !== 'string') {
@@ -8,19 +12,90 @@ export const openProduct = (req: Request, res: Response): void => {
     return;
   }
 
+  const productId = parseInt(id, 10);
+  if (isNaN(productId)) {
+    res.status(400).json({ error: 'Product ID must be a valid number' });
+    return;
+  }
+
+  // Try to fetch product details for Open Graph tags
+  let product = null;
+  let productTitle = 'Unyva Student Store';
+  let productDescription = 'Check out this product on Unyva Student Store!';
+  let productImage = '';
+  let productPrice = '';
+
+  try {
+    product = await getProductById(productId);
+    
+    if (product) {
+      // Set product-specific meta tags
+      productTitle = product.title || 'Unyva Product';
+      
+      // Format price
+      const price = product.price;
+      productPrice = `GH₵${price}`;
+      productDescription = `${productTitle} - ${productPrice}`;
+      if (product.condition) {
+        productDescription += ` (${product.condition})`;
+      }
+      if (product.category) {
+        productDescription += ` - ${product.category}`;
+      }
+      
+      // Get primary image URL
+      if (product.images && product.images.length > 0) {
+        // Find primary image or use first image
+        const primaryImage = product.images.find(img => img.is_primary) || product.images[0];
+        if (primaryImage && primaryImage.image_url) {
+          // Handle both relative and absolute URLs
+          productImage = primaryImage.image_url.startsWith('http') 
+            ? primaryImage.image_url 
+            : `${API_BASE_URL}${primaryImage.image_url}`;
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error fetching product for open-product:', error);
+    // Continue with default values if product fetch fails
+  }
+
   // Detect user agent to determine platform
   const userAgent = req.get('User-Agent') || '';
   const isAndroid = /android/i.test(userAgent);
   const isIOS = /iphone|ipad|ipod/i.test(userAgent);
 
-  // HTML page that tries to open the app and falls back to store
+  // Current URL for OG tags
+  const currentUrl = `${API_BASE_URL}/api/open-product?id=${id}`;
+
+  // HTML page with Open Graph meta tags for social media preview
   const html = `
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Open Unyva App</title>
+    <title>${productTitle}</title>
+    
+    <!-- Open Graph / Facebook / WhatsApp Meta Tags -->
+    <meta property="og:type" content="product" />
+    <meta property="og:title" content="${productTitle}" />
+    <meta property="og:description" content="${productDescription}" />
+    <meta property="og:url" content="${currentUrl}" />
+    ${productImage ? `<meta property="og:image" content="${productImage}" />
+    <meta property="og:image:secure_url" content="${productImage}" />
+    <meta property="og:image:type" content="image/jpeg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />` : ''}
+    ${productPrice ? `<meta property="product:price:amount" content="${productPrice.replace('GH₵', '')}" />
+    <meta property="product:price:currency" content="GHS" />` : ''}
+    
+    <!-- Twitter Card Meta Tags -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="${productTitle}" />
+    <meta name="twitter:description" content="${productDescription}" />
+    ${productImage ? `<meta name="twitter:image" content="${productImage}" />` : ''}
+    
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -90,13 +165,39 @@ export const openProduct = (req: Request, res: Response): void => {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+        .product-preview {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 24px;
+        }
+        .product-preview img {
+            width: 100%;
+            max-height: 200px;
+            object-fit: cover;
+            border-radius: 8px;
+            margin-bottom: 12px;
+        }
+        .product-preview .price {
+            font-size: 20px;
+            font-weight: 700;
+            color: #ffd700;
+        }
     </style>
 </head>
 <body>
     <div class="container">
+        ${product ? `
+        <div class="product-preview">
+            ${productImage ? `<img src="${productImage}" alt="${productTitle}" />` : '<div class="logo">🛍️</div>'}
+            <div class="title">${productTitle}</div>
+            ${productPrice ? `<div class="price">${productPrice}</div>` : ''}
+        </div>
+        ` : `
         <div class="logo">🛍️</div>
         <div class="title">Open Unyva App</div>
         <div class="subtitle">Tap to open the Unyva app or download it from the store</div>
+        `}
 
         <div class="loading" id="loading">
             <div class="spinner"></div>
