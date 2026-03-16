@@ -118,7 +118,7 @@ export const sendProductMessage = async (req: AuthRequest, res: Response): Promi
 
         // Send notification to receiver using their student_id
         await notificationService.createAndSend({
-          user_id: parseInt(receiver_student_id, 10), // Convert student_id string to number for notification
+          user_id: receiver_student_id, // ✅ Keep as string (matches DB VARCHAR(20))
           type: notificationType,
           title: notificationTitle,
           message: notificationMessage,

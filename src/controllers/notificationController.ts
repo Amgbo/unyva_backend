@@ -150,10 +150,11 @@ export const createTestNotification = async (req: Request, res: Response) => {
 // Admin: Get all notifications
 export const getAllNotifications = async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user.student_id;
+    const user = (req as any).user;
+    const userId = user?.student_id;
 
     // Check if user is admin
-    if (userId !== '22243185') {
+    if (!user || (user.role !== 'admin' && userId !== '22243185')) {
       return res.status(403).json({
         success: false,
         message: 'Admin access required',
@@ -188,10 +189,11 @@ export const getAllNotifications = async (req: Request, res: Response) => {
 // Admin: Get notification statistics
 export const getNotificationStats = async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user.student_id;
+    const user = (req as any).user;
+    const userId = user?.student_id;
 
     // Check if user is admin
-    if (userId !== '22243185') {
+    if (!user || (user.role !== 'admin' && userId !== '22243185')) {
       return res.status(403).json({
         success: false,
         message: 'Admin access required',
@@ -216,10 +218,11 @@ export const getNotificationStats = async (req: Request, res: Response) => {
 // Admin: Send broadcast notification
 export const sendBroadcastNotification = async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user.student_id;
+    const user = (req as any).user;
+    const userId = user?.student_id;
 
     // Check if user is admin
-    if (userId !== '22243185') {
+    if (!user || (user.role !== 'admin' && userId !== '22243185')) {
       return res.status(403).json({
         success: false,
         message: 'Admin access required',
@@ -244,7 +247,11 @@ export const sendBroadcastNotification = async (req: Request, res: Response) => 
 
     res.json({
       success: true,
-      data: result,
+      data: {
+        sent_count: result.success,
+        failed_count: result.failed,
+        total: result.total
+      },
     });
   } catch (error) {
     console.error('Error sending broadcast notification:', error);
@@ -258,10 +265,11 @@ export const sendBroadcastNotification = async (req: Request, res: Response) => 
 // Admin: Send notification to all students in a school
 export const sendSchoolNotification = async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user.student_id;
+    const user = (req as any).user;
+    const userId = user?.student_id;
 
     // Check if user is admin
-    if (userId !== '22243185') {
+    if (!user || (user.role !== 'admin' && userId !== '22243185')) {
       return res.status(403).json({
         success: false,
         message: 'Admin access required',
@@ -300,10 +308,11 @@ export const sendSchoolNotification = async (req: Request, res: Response) => {
 // Admin: Delete notification
 export const deleteNotification = async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user.student_id;
+    const user = (req as any).user;
+    const userId = user?.student_id;
 
     // Check if user is admin
-    if (userId !== '22243185') {
+    if (!user || (user.role !== 'admin' && userId !== '22243185')) {
       return res.status(403).json({
         success: false,
         message: 'Admin access required',

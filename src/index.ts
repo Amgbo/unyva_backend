@@ -32,14 +32,22 @@ import recommendationRoutes from './routes/recommendationRoutes.js';
 import dealRoutes from './routes/dealRoutes.js';
 import throneRoutes from './routes/throneRoutes.js';
 import leaderboardRoutes from './routes/leaderboardRoutes.js';
+import { foundItemsRouter } from './routes/foundItemsRoutes.js';
+import { notificationService } from './services/notificationService.js';
 
 // Initialize app
 const app = express();
 const PORT = Number(process.env.PORT) || 5000;
 const HOST = process.env.HOST || '0.0.0.0'; // Listen on all interfaces
 
+// Ensure req.protocol/host respect reverse proxy headers in production deployments.
+app.set('trust proxy', 1);
+
 // Server variable to be used in signal handlers
 let server: any;
+let notificationProcessorInterval: ReturnType<typeof setInterval> | null = null;
+let notificationCleanupInterval: ReturnType<typeof setInterval> | null = null;
+let isShuttingDown = false;
 
 // -------------------- OLD CORS CONFIG (commented out) --------------------
 /*
@@ -51,7 +59,7 @@ const allowedOrigins = [
   'exp://your-app-url',
   'http://10.128.105.124:8081',
 
-  // ✅ For your current network IP
+  // For your current network IP
   'http://172.20.10.4:5000',  // backend
   'http://172.20.10.4:8081',  // Expo Metro
   'exp://172.20.10.4:8081',   // Expo app
@@ -142,6 +150,8 @@ app.use('/api/recommendations', recommendationRoutes);
 app.use('/api/deals', dealRoutes);
 app.use('/api/thrones', throneRoutes);
 app.use('/api/leaderboard', leaderboardRoutes);
+app.use('/api/found-items', foundItemsRouter);
+console.log('✅ Found Items routes registered at /api/found-items');
 
 console.log('✅ Admin routes registered at /api/admin');
 console.log('✅ Throne routes registered at /api/thrones');
@@ -194,11 +204,51 @@ app.use((err: any, req: Request, res: Response, _next: any) => {
     await initializeDatabase();
     console.log('✅ Database initialization completed');
 
-    // Start server
+// Start server
     server = app.listen(PORT, HOST, () => {
       console.log(`✅ Server running at http://${HOST}:${PORT}`);
       console.log(`✅ Server also accessible at http://localhost:${PORT}`);
       console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
+
+      // Start notification processor to handle pending/scheduled notifications
+      let processorRunning = false;
+      let processorErrors = 0;
+
+      notificationProcessorInterval = setInterval(async () => {
+        if (processorRunning) {
+          console.warn('⚠️ Previous notification processor still running, skipping this cycle');
+          return;
+        }
+        
+        processorRunning = true;
+        try {
+          const startTime = Date.now();
+          await notificationService.processPendingNotifications();
+          const duration = Date.now() - startTime;
+          console.log(`✅ Notification processor completed in ${duration}ms`);
+          processorErrors = 0; // Reset error counter on success
+        } catch (error) {
+          processorErrors++;
+          console.error(`❌ Error processing pending notifications (attempt ${processorErrors}):`, error);
+          
+          // Alert if too many consecutive errors
+          if (processorErrors >= 3) {
+            console.error('🚨 CRITICAL: Notification processor has failed 3 times consecutively!');
+            // TODO: Send alert to monitoring system (Sentry, DataDog, etc.)
+          }
+        } finally {
+          processorRunning = false;
+        }
+      }, 30000); // Process every 30 seconds
+
+      // Start notification cleanup job (daily)
+      notificationCleanupInterval = setInterval(async () => {
+        try {
+          await notificationService.cleanupOldNotifications(90);
+        } catch (error) {
+          console.error('Error in notification cleanup job:', error);
+        }
+      }, 24 * 60 * 60 * 1000); // Run daily
     });
   } catch (error) {
     console.error('❌ Failed to start server:', error);
@@ -207,20 +257,41 @@ app.use((err: any, req: Request, res: Response, _next: any) => {
 })();
 
 // Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM signal received: closing HTTP server');
-  server.close(() => {
+const shutdown = async (signal: 'SIGTERM' | 'SIGINT') => {
+  if (isShuttingDown) {
+    return;
+  }
+
+  isShuttingDown = true;
+  console.log(`${signal} signal received: closing HTTP server`);
+
+  if (notificationProcessorInterval) {
+    clearInterval(notificationProcessorInterval);
+    notificationProcessorInterval = null;
+  }
+
+  if (notificationCleanupInterval) {
+    clearInterval(notificationCleanupInterval);
+    notificationCleanupInterval = null;
+  }
+
+  if (!server) {
+    await pool.end();
+    return;
+  }
+
+  server.close(async () => {
     console.log('HTTP server closed');
-    pool.end();
+    await pool.end();
   });
+};
+
+process.once('SIGTERM', () => {
+  void shutdown('SIGTERM');
 });
 
-process.on('SIGINT', () => {
-  console.log('SIGINT signal received: closing HTTP server');
-  server.close(() => {
-    console.log('HTTP server closed');
-    pool.end();
-  });
+process.once('SIGINT', () => {
+  void shutdown('SIGINT');
 });
 
 // Handle uncaught exceptions

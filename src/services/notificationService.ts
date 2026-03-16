@@ -12,8 +12,45 @@ export class NotificationService {
   /**
    * Create and send a notification immediately
    */
+  private validateNotificationData(data: CreateNotificationData): void {
+    if (!data.user_id || typeof data.user_id !== 'string') {
+      throw new Error('Invalid user_id: must be a non-empty string');
+    }
+    
+    if (!data.type || typeof data.type !== 'string') {
+      throw new Error('Invalid type: must be a non-empty string');
+    }
+    
+    if (!data.title || typeof data.title !== 'string' || data.title.length === 0) {
+      throw new Error('Invalid title: must be a non-empty string');
+    }
+    
+    if (!data.message || typeof data.message !== 'string' || data.message.length === 0) {
+      throw new Error('Invalid message: must be a non-empty string');
+    }
+    
+    if (data.title.length > 255) {
+      throw new Error('Title exceeds maximum length of 255 characters');
+    }
+    
+    if (data.message.length > 1000) {
+      throw new Error('Message exceeds maximum length of 1000 characters');
+    }
+    
+    if (data.priority && !['low', 'medium', 'high'].includes(data.priority)) {
+      throw new Error('Invalid priority: must be low, medium, or high');
+    }
+    
+    if (data.delivery_methods && !Array.isArray(data.delivery_methods)) {
+      throw new Error('Invalid delivery_methods: must be an array');
+    }
+  }
+
   async createAndSend(notificationData: CreateNotificationData): Promise<any> {
     try {
+      // Validate before creating
+      this.validateNotificationData(notificationData);
+      
       // Create notification in database
       const notification = await NotificationModel.create(notificationData);
 
@@ -129,7 +166,7 @@ export class NotificationService {
    * Create order status notification
    */
   async createOrderStatusNotification(
-    userId: number,
+    userId: string,
     orderId: number,
     status: string,
     orderData: any = {}
@@ -168,7 +205,7 @@ export class NotificationService {
    * Create new order notification for seller
    */
   async createNewOrderNotification(
-    sellerId: number,
+    sellerId: string,
     orderId: number,
     orderData: any = {}
   ): Promise<any> {
@@ -195,7 +232,7 @@ export class NotificationService {
    * Create delivery status notification
    */
   async createDeliveryStatusNotification(
-    userId: number,
+    userId: string,
     orderId: number,
     deliveryStatus: string,
     orderData: any = {}
@@ -233,7 +270,7 @@ export class NotificationService {
    * Create payment status notification
    */
   async createPaymentStatusNotification(
-    userId: number,
+    userId: string,
     orderId: number,
     paymentStatus: string,
     orderData: any = {}
@@ -268,6 +305,7 @@ export class NotificationService {
 
   /**
    * Process pending notifications (for scheduled notifications)
+   * Uses exponential backoff for retries
    */
   async processPendingNotifications(): Promise<void> {
     try {
@@ -275,18 +313,37 @@ export class NotificationService {
 
       for (const notification of pendingNotifications) {
         try {
+          // Calculate delay based on retry count using exponential backoff
+          const retryCount = notification.retry_count || 0;
+          const baseDelay = 1000; // 1 second base delay
+          const maxDelay = 300000; // 5 minutes max delay
+          const delay = Math.min(baseDelay * Math.pow(2, retryCount), maxDelay);
+          
+          // Apply exponential backoff delay if this is a retry
+          if (retryCount > 0) {
+            console.log(`⏳ Waiting ${delay}ms before retry for notification ${notification.id}`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
+
           await this.sendNotification(notification);
         } catch (error) {
           console.error(`Failed to send notification ${notification.id}:`, error);
 
           // Increment retry count
           const updatedNotification = await NotificationModel.incrementRetryCount(notification.id!);
+          const currentRetry = updatedNotification?.retry_count || 0;
+          const maxRetries = notification.max_retries || 3;
 
           // If max retries reached, mark as failed
-          if (updatedNotification && (updatedNotification.retry_count ?? 0) >= (updatedNotification.max_retries ?? 3)) {
+          if (currentRetry >= maxRetries) {
             await NotificationModel.updateStatus(notification.id!, 'failed', {
-              error_message: 'Max retries exceeded'
+              error_message: `Max retries (${maxRetries}) exceeded. Last error: ${error instanceof Error ? error.message : 'Unknown error'}`
             });
+            console.error(`❌ Notification ${notification.id} marked as failed after ${currentRetry} retries`);
+          } else {
+            // Schedule next retry with backoff
+            const nextDelay = Math.min(1000 * Math.pow(2, currentRetry), 300000);
+            console.log(`🔄 Notification ${notification.id} will retry in ${nextDelay}ms (attempt ${currentRetry + 1}/${maxRetries})`);
           }
         }
       }
@@ -296,21 +353,43 @@ export class NotificationService {
   }
 
   /**
-   * Register push token for a user
+   * Register push token for a user with validation
    */
-  async registerPushToken(userId: number, pushToken: string): Promise<void> {
+  async registerPushToken(userId: string, pushToken: string): Promise<{ success: boolean; message: string }> {
     try {
+      // Validate the push token format
+      if (!pushToken || pushToken.trim().length === 0) {
+        throw new Error('Push token cannot be empty');
+      }
+
+      // STRICT validation - reject invalid tokens immediately
       if (!Expo.isExpoPushToken(pushToken)) {
-        throw new Error('Invalid Expo push token');
+        throw new Error(`Invalid Expo push token format: ${(pushToken as string).substring(0, 20)}...`);
+      }
+
+      // Validate token length (reasonable bounds)
+      if (pushToken.length < 10 || pushToken.length > 500) {
+        throw new Error('Push token has invalid length');
       }
 
       const query = `
         UPDATE students
         SET push_token = $1, updated_at = CURRENT_TIMESTAMP
         WHERE student_id = $2
+        RETURNING student_id
       `;
 
-      await pool.query(query, [pushToken, userId]);
+      const result = await pool.query(query, [pushToken, userId]);
+      
+      if (result.rowCount === 0) {
+        throw new Error('User not found');
+      }
+
+      console.log(`✅ Valid push token registered for user ${userId}`);
+      return { 
+        success: true, 
+        message: 'Push token registered successfully'
+      };
     } catch (error) {
       console.error('Error registering push token:', error);
       throw error;
@@ -318,9 +397,96 @@ export class NotificationService {
   }
 
   /**
+   * Validate a push token without registering it
+   */
+  async validatePushToken(pushToken: string): Promise<{ valid: boolean; type: string; message: string }> {
+    try {
+      if (!pushToken || pushToken.trim().length === 0) {
+        return { valid: false, type: 'unknown', message: 'Push token is empty' };
+      }
+
+      if (pushToken.length < 10 || pushToken.length > 500) {
+        return { valid: false, type: 'unknown', message: 'Push token has invalid length' };
+      }
+
+      // Check if it's a valid Expo push token
+      if (Expo.isExpoPushToken(pushToken)) {
+        return { valid: true, type: 'expo', message: 'Valid Expo push token' };
+      }
+
+      // Could be a platform-specific token (APNs, FCM)
+      const tokenString = String(pushToken);
+      if (tokenString.startsWith('android') || tokenString.startsWith('ios')) {
+        return { valid: true, type: 'platform', message: 'Valid platform-specific push token' };
+      }
+
+      return { valid: false, type: 'unknown', message: 'Unrecognized push token format' };
+    } catch (error) {
+      console.error('Error validating push token:', error);
+      return { valid: false, type: 'error', message: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
+  /**
+   * Clean up invalid push tokens for users
+   */
+  async cleanupInvalidPushTokens(): Promise<number> {
+    try {
+      // Get all users with push tokens
+      const query = `
+        SELECT student_id, push_token FROM students
+        WHERE push_token IS NOT NULL AND push_token != ''
+      `;
+      const result = await pool.query(query);
+      
+      let cleanedCount = 0;
+      
+      for (const row of result.rows) {
+        const validation = await this.validatePushToken(row.push_token);
+        if (!validation.valid) {
+          // Clear invalid token
+          await pool.query(
+            'UPDATE students SET push_token = NULL WHERE student_id = $1',
+            [row.student_id]
+          );
+          console.log(`🧹 Cleared invalid push token for user ${row.student_id}: ${validation.message}`);
+          cleanedCount++;
+        }
+      }
+      
+      console.log(`✅ Cleaned up ${cleanedCount} invalid push tokens`);
+      return cleanedCount;
+    } catch (error) {
+      console.error('Error cleaning up invalid push tokens:', error);
+      throw error;
+    }
+  }
+
+  async cleanupOldNotifications(daysOld: number = 90): Promise<number> {
+    try {
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - daysOld);
+      
+      const result = await pool.query(
+        `DELETE FROM notifications
+         WHERE created_at < $1 AND status IN ('read', 'failed')
+         RETURNING id`,
+        [cutoffDate]
+      );
+      
+      const deletedCount = result.rowCount ?? 0;
+      console.log(`🧹 Cleaned up ${deletedCount} old notifications (older than ${daysOld} days)`);
+      return deletedCount;
+    } catch (error) {
+      console.error('Error cleaning up old notifications:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Get user's notifications
    */
-  async getUserNotifications(userId: number, options: {
+  async getUserNotifications(userId: string, options: {
     status?: string;
     type?: string;
     limit?: number;
@@ -339,13 +505,46 @@ export class NotificationService {
   /**
    * Mark all notifications as read for a user
    */
-  async markAllAsRead(userId: number): Promise<any> {
+  async markAllAsRead(userId: string): Promise<any> {
     return NotificationModel.markAllAsRead(userId);
   }
 
   /**
-   * Send broadcast notification to all users with push tokens
+   * Chunk array into smaller batches for concurrent processing
    */
+  private chunkArray<T>(array: T[], chunkSize: number): T[][] {
+    const chunks: T[][] = [];
+    for (let i = 0; i < array.length; i += chunkSize) {
+      chunks.push(array.slice(i, i + chunkSize));
+    }
+    return chunks;
+  }
+
+  /**
+   * Send broadcast notification to all users with push tokens
+   * Uses concurrent processing with chunked batches for better performance
+   */
+  private broadcastNotificationLimiter = {
+    lastBroadcast: 0,
+    minIntervalMs: 60000, // 1 minute between broadcasts
+  };
+
+  private checkBroadcastRateLimit(): void {
+    const now = Date.now();
+    const timeSinceLastBroadcast = now - this.broadcastNotificationLimiter.lastBroadcast;
+    
+    if (timeSinceLastBroadcast < this.broadcastNotificationLimiter.minIntervalMs) {
+      const waitSeconds = Math.ceil(
+        (this.broadcastNotificationLimiter.minIntervalMs - timeSinceLastBroadcast) / 1000
+      );
+      throw new Error(
+        `Broadcast notifications are rate limited. Please wait ${waitSeconds} seconds.`
+      );
+    }
+    
+    this.broadcastNotificationLimiter.lastBroadcast = now;
+  }
+
   async sendBroadcastNotification(notificationData: {
     type: string;
     title: string;
@@ -355,6 +554,8 @@ export class NotificationService {
     delivery_methods?: string[];
   }): Promise<{ success: number; failed: number; total: number }> {
     try {
+      // Check rate limit
+      this.checkBroadcastRateLimit();
       // Get all users with push tokens
       const usersQuery = `
         SELECT student_id, push_token FROM students
@@ -367,28 +568,41 @@ export class NotificationService {
       }
 
       const users = usersResult.rows;
+      const CHUNK_SIZE = 10; // Process 10 notifications concurrently
+      const chunks = this.chunkArray(users, CHUNK_SIZE);
+      
       let successCount = 0;
       let failedCount = 0;
 
-      // Send notification to each user
-      for (const user of users) {
-        try {
-          const userNotificationData: CreateNotificationData = {
-            user_id: user.student_id,
-            type: notificationData.type,
-            title: notificationData.title,
-            message: notificationData.message,
-            data: notificationData.data || {},
-            priority: notificationData.priority || 'medium',
-            delivery_methods: notificationData.delivery_methods || ['push']
-          };
+      // Process chunks concurrently
+      for (const chunk of chunks) {
+        const results = await Promise.allSettled(
+          chunk.map(async (user) => {
+            const userNotificationData: CreateNotificationData = {
+              user_id: user.student_id,
+              type: notificationData.type,
+              title: notificationData.title,
+              message: notificationData.message,
+              data: notificationData.data || {},
+              priority: notificationData.priority || 'medium',
+              delivery_methods: notificationData.delivery_methods || ['push']
+            };
 
-          await this.createAndSend(userNotificationData);
-          successCount++;
-        } catch (error) {
-          console.error(`Failed to send broadcast notification to user ${user.student_id}:`, error);
-          failedCount++;
-        }
+            await this.createAndSend(userNotificationData);
+            return { success: true, userId: user.student_id };
+          })
+        );
+
+        // Count successes and failures
+        results.forEach((result) => {
+          if (result.status === 'fulfilled' && result.value.success) {
+            successCount++;
+          } else {
+            failedCount++;
+            const userId = result.status === 'fulfilled' ? result.value.userId : 'unknown';
+            console.error(`Failed to send broadcast notification to user ${userId}`);
+          }
+        });
       }
 
       console.log(`Broadcast notification sent: ${successCount} successful, ${failedCount} failed, ${users.length} total`);
@@ -407,6 +621,7 @@ export class NotificationService {
 
   /**
    * Send notification to all students in a specific university
+   * Uses concurrent processing with chunked batches for better performance
    */
   async sendSchoolNotification(universityId: number, notificationData: {
     type: string;
@@ -429,28 +644,41 @@ export class NotificationService {
       }
 
       const users = usersResult.rows;
+      const CHUNK_SIZE = 10; // Process 10 notifications concurrently
+      const chunks = this.chunkArray(users, CHUNK_SIZE);
+      
       let successCount = 0;
       let failedCount = 0;
 
-      // Send notification to each student in the school
-      for (const user of users) {
-        try {
-          const userNotificationData: CreateNotificationData = {
-            user_id: user.student_id,
-            type: notificationData.type,
-            title: notificationData.title,
-            message: notificationData.message,
-            data: notificationData.data || {},
-            priority: notificationData.priority || 'medium',
-            delivery_methods: notificationData.delivery_methods || ['push']
-          };
+      // Process chunks concurrently
+      for (const chunk of chunks) {
+        const results = await Promise.allSettled(
+          chunk.map(async (user) => {
+            const userNotificationData: CreateNotificationData = {
+              user_id: user.student_id,
+              type: notificationData.type,
+              title: notificationData.title,
+              message: notificationData.message,
+              data: notificationData.data || {},
+              priority: notificationData.priority || 'medium',
+              delivery_methods: notificationData.delivery_methods || ['push']
+            };
 
-          await this.createAndSend(userNotificationData);
-          successCount++;
-        } catch (error) {
-          console.error(`Failed to send school notification to user ${user.student_id}:`, error);
-          failedCount++;
-        }
+            await this.createAndSend(userNotificationData);
+            return { success: true, userId: user.student_id };
+          })
+        );
+
+        // Count successes and failures
+        results.forEach((result) => {
+          if (result.status === 'fulfilled' && result.value.success) {
+            successCount++;
+          } else {
+            failedCount++;
+            const userId = result.status === 'fulfilled' ? result.value.userId : 'unknown';
+            console.error(`Failed to send school notification to user ${userId}`);
+          }
+        });
       }
 
       console.log(`School notification sent to university ${universityId}: ${successCount} successful, ${failedCount} failed, ${users.length} total`);
@@ -465,6 +693,87 @@ export class NotificationService {
       console.error('Error sending school notification:', error);
       throw error;
     }
+  }
+
+  /**
+   * Create notification when a new found item is posted
+   */
+  async createFoundItemNotification(
+    studentId: string,
+    foundItemId: number,
+    itemTitle: string
+  ): Promise<any> {
+    const title = 'New Found Item Posted';
+    const message = `You have posted a new found item: ${itemTitle}`;
+
+    const notificationData: CreateNotificationData = {
+      user_id: studentId,
+      type: 'found_item',
+      title,
+      message,
+      data: {
+        found_item_id: foundItemId,
+        action: 'created'
+      },
+      priority: 'medium',
+      delivery_methods: ['push']
+    };
+
+    return this.createAndSend(notificationData);
+  }
+
+  /**
+   * Create notification when a found item is claimed
+   */
+  async createFoundItemClaimedNotification(
+    studentId: string,
+    foundItemId: number,
+    itemTitle: string
+  ): Promise<any> {
+    const title = 'Item Claimed';
+    const message = `Your found item "${itemTitle}" has been marked as claimed`;
+
+    const notificationData: CreateNotificationData = {
+      user_id: studentId,
+      type: 'found_item',
+      title,
+      message,
+      data: {
+        found_item_id: foundItemId,
+        action: 'claimed'
+      },
+      priority: 'high',
+      delivery_methods: ['push']
+    };
+
+    return this.createAndSend(notificationData);
+  }
+
+  /**
+   * Create notification when a found item is resolved
+   */
+  async createFoundItemResolvedNotification(
+    studentId: string,
+    foundItemId: number,
+    itemTitle: string
+  ): Promise<any> {
+    const title = 'Item Resolved';
+    const message = `Your found item "${itemTitle}" has been marked as resolved`;
+
+    const notificationData: CreateNotificationData = {
+      user_id: studentId,
+      type: 'found_item',
+      title,
+      message,
+      data: {
+        found_item_id: foundItemId,
+        action: 'resolved'
+      },
+      priority: 'high',
+      delivery_methods: ['push']
+    };
+
+    return this.createAndSend(notificationData);
   }
 }
 

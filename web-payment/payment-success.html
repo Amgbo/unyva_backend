@@ -202,6 +202,29 @@
                 const data = await response.json();
 
                 if (data.success) {
+                    // Persist a local payment flag so hybrid/webview flows
+                    // and browser-based redirects can mark the student as paid.
+                    try {
+                        localStorage.setItem(`payment_${studentId}`, 'true');
+
+                        // If a serialized user object exists in localStorage, mark it paid too.
+                        const userKeys = ['user_data', 'unyva_student', 'student'];
+                        for (const key of userKeys) {
+                            const raw = localStorage.getItem(key);
+                            if (raw) {
+                                try {
+                                    const obj = JSON.parse(raw);
+                                    obj.has_paid = true;
+                                    localStorage.setItem(key, JSON.stringify(obj));
+                                } catch (e) {
+                                    // ignore parse errors
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('Could not persist local payment flag:', e);
+                    }
+
                     showSuccess();
                 } else {
                     showError(data.message || 'Payment verification failed');

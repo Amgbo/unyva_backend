@@ -2,7 +2,7 @@ import { pool } from '../db.js';
 
 export interface Notification {
   id?: number;
-  user_id: number;
+  user_id: string;  // Changed from number to string to match DB VARCHAR(20)
   type: string;
   title: string;
   message: string;
@@ -21,7 +21,7 @@ export interface Notification {
 }
 
 export interface CreateNotificationData {
-  user_id: number;
+  user_id: string;  // Changed from number to string to match DB VARCHAR(20)
   type: string;
   title: string;
   message: string;
@@ -68,7 +68,7 @@ export class NotificationModel {
     return result.rows[0];
   }
 
-  static async findByUserId(userId: number, options: {
+  static async findByUserId(userId: string, options: {
     status?: string;
     type?: string;
     limit?: number;
@@ -189,7 +189,7 @@ export class NotificationModel {
     return this.updateStatus(id, 'read', { read_at: new Date() });
   }
 
-  static async markAllAsRead(userId: number): Promise<number> {
+  static async markAllAsRead(userId: string): Promise<number> {
     const query = `
       UPDATE notifications
       SET status = 'read', read_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP

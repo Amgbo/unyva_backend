@@ -98,17 +98,25 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
       // Additional safety checks: ensure the transaction amount and metadata match expectations
       const EXPECTED_AMOUNT = Number(process.env.PAYMENT_AMOUNT_PESAWAS || '500'); // default 500 pesewas = GH¢5
 
-      if (typeof data.amount === 'number') {
-        if (data.amount !== EXPECTED_AMOUNT) {
-          console.warn(`❌ Amount mismatch - student: ${student_id}, ref: ${reference}, expected: ${EXPECTED_AMOUNT}, got: ${data.amount}`);
-          res.status(400).json({ success: false, message: 'Payment amount does not match expected value', transaction: data });
-          return;
-        }
+      // Normalize amount from Paystack (may be string or number, and sometimes scaled)
+      const txnAmount = Number(data.amount);
+      if (Number.isNaN(txnAmount)) {
+        console.warn(`❌ Unable to parse transaction amount - student: ${student_id}, ref: ${reference}, raw: ${data.amount}`);
+        res.status(400).json({ success: false, message: 'Invalid transaction amount', transaction: data });
+        return;
+      }
+
+      // Accept either exact match in pesewas, or match when scaled (defensive)
+      const amountMatches = txnAmount === EXPECTED_AMOUNT || txnAmount === EXPECTED_AMOUNT * 100;
+      if (!amountMatches) {
+        console.warn(`❌ Amount mismatch - student: ${student_id}, ref: ${reference}, expected: ${EXPECTED_AMOUNT} (or ${EXPECTED_AMOUNT * 100}), got: ${txnAmount}`);
+        res.status(400).json({ success: false, message: 'Payment amount does not match expected value', transaction: data });
+        return;
       }
 
       // Ensure metadata.student_id (if provided by Paystack) matches the supplied student_id
-      const metadataStudentId = data.metadata?.student_id || data.metadata?.studentId || null;
-      if (metadataStudentId && metadataStudentId !== student_id) {
+      const metadataStudentId = data.metadata?.student_id ?? data.metadata?.studentId ?? null;
+      if (metadataStudentId && String(metadataStudentId) !== String(student_id)) {
         console.warn(`❌ Metadata mismatch - student: ${student_id}, ref: ${reference}, metadata student_id: ${metadataStudentId}`);
         res.status(400).json({ success: false, message: 'Payment metadata student_id mismatch', transaction: data });
         return;
@@ -120,8 +128,9 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
         await client.query('BEGIN');
 
         // Check if already paid to prevent duplicate updates
+        // Coerce student_id to string to avoid type mismatches between metadata and DB
         const checkQuery = `SELECT has_paid FROM students WHERE student_id = $1 FOR UPDATE;`;
-        const checkResult = await client.query(checkQuery, [student_id]);
+        const checkResult = await client.query(checkQuery, [String(student_id)]);
 
         if (checkResult.rows.length === 0) {
           await client.query('ROLLBACK');
@@ -150,7 +159,7 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
           RETURNING *;
         `;
 
-        const result = await client.query(updateQuery, [student_id]);
+        const result = await client.query(updateQuery, [String(student_id)]);
         await client.query('COMMIT');
 
         console.log(`✅ Payment verified and updated - student: ${student_id}, ref: ${reference}, amount: ${data.amount} pesewas`);
@@ -252,7 +261,14 @@ export const handleWebhook = async (req: Request, res: Response): Promise<void> 
       ? req.body
       : JSON.stringify(req.body || {});
 
-    const event = JSON.parse(rawBody);
+    let event: any;
+    try {
+      event = JSON.parse(rawBody);
+    } catch (err) {
+      console.error('❌ Failed to parse webhook JSON:', err);
+      res.status(400).json({ error: 'Invalid JSON payload' });
+      return;
+    }
 
     // Ensure webhook secret is configured
     if (!PAYSTACK_WEBHOOK_SECRET) {
@@ -281,8 +297,9 @@ export const handleWebhook = async (req: Request, res: Response): Promise<void> 
 
     // Handle charge.success event
     if (event.event === 'charge.success') {
-      const email = event.data.customer.email;
-      const studentId = event.data.metadata?.student_id;
+      const email = event.data?.customer?.email || null;
+      const rawStudentId = event.data?.metadata?.student_id ?? event.data?.metadata?.studentId ?? null;
+      const studentId = rawStudentId ? String(rawStudentId) : null;
 
       // Skip webhook processing for admin
       if (studentId === '22243185') {
@@ -300,7 +317,7 @@ export const handleWebhook = async (req: Request, res: Response): Promise<void> 
           WHERE student_id = $1
           RETURNING *;
         `;
-        params = [studentId];
+        params = [String(studentId)];
       } else {
         checkQuery = `SELECT has_paid FROM students WHERE email = $1;`;
         updateQuery = `
@@ -309,7 +326,7 @@ export const handleWebhook = async (req: Request, res: Response): Promise<void> 
           WHERE email = $1
           RETURNING *;
         `;
-        params = [email];
+        params = [String(email)];
       }
 
       // Use transaction to prevent race conditions
