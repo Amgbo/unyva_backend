@@ -496,16 +496,30 @@ export const addFoundItem = async (req: any, res: Response): Promise<void> => {
       ]
     );
 
-    // Send notification to the poster
+    // Send GLOBAL broadcast + private confirmation
     try {
+      // Notify ALL users about new found item
+      await notificationService.sendBroadcastNotification({
+        type: 'found_item_new',
+        title: 'New Found Item Posted!',
+        message: `Someone found "${title}" - check the Found Items section! 🎉`,
+        data: {
+          screen: 'found-items',
+          found_item_id: result.rows[0].id,
+          action: 'view_new'
+        },
+        priority: 'high',
+        delivery_methods: ['push']
+      });
+
+      // Private confirmation to poster
       await notificationService.createFoundItemNotification(
         studentId,
         result.rows[0].id,
         title
       );
     } catch (notifyError) {
-      // Log but don't fail the request if notification fails
-      console.warn('Failed to send notification:', notifyError);
+      console.warn('Failed to send broadcast + private notifications:', notifyError);
     }
 
     const normalizedCreatedItem = normalizeFoundItemForResponse(result.rows[0], req);
