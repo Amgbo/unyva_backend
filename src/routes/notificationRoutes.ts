@@ -20,8 +20,8 @@ router.use(authMiddleware);
 
 // User notification routes
 router.get('/', getUserNotifications);
-router.put('/:id/read', markNotificationAsRead);
 router.put('/mark-all-read', markAllNotificationsAsRead);
+router.put('/:id/read', markNotificationAsRead);
 router.post('/register-token', registerPushToken);
 router.post('/test', createTestNotification);
 

@@ -59,6 +59,14 @@ export interface ProductWithImages extends Product {
   student_name?: string;
 }
 
+export interface PaginatedProductsResult {
+  products: ProductWithImages[];
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+}
+
 export interface CreateProductData {
   student_id: string;
   title: string;
@@ -130,6 +138,86 @@ export const getAllProducts = async (excludeStudentId?: string): Promise<Product
     }));
   } catch (error) {
     console.error('Database error in getAllProducts:', error);
+    throw error;
+  }
+};
+
+export const getAllProductsPaginated = async (
+  options: { limit: number; offset: number; excludeStudentId?: string }
+): Promise<PaginatedProductsResult> => {
+  try {
+    const { limit, offset, excludeStudentId } = options;
+    const values: any[] = [];
+    const filters = ["p.status IN ('available', 'sold', 'pending')", 'p.is_approved = true'];
+
+    if (excludeStudentId) {
+      values.push(excludeStudentId);
+      filters.push(`p.student_id != $${values.length}`);
+    }
+
+    const whereClause = filters.join(' AND ');
+
+    const countQuery = `
+      SELECT COUNT(*)::int AS total
+      FROM products p
+      WHERE ${whereClause}
+    `;
+
+    const limitPlaceholder = `$${values.length + 1}`;
+    const offsetPlaceholder = `$${values.length + 2}`;
+
+    const dataQuery = `
+      SELECT
+        p.*,
+        h.full_name as hall_name,
+        s.first_name || ' ' || s.last_name as student_name,
+        COALESCE(
+          JSON_AGG(
+            JSON_BUILD_OBJECT(
+              'id', pi.id,
+              'product_id', pi.product_id,
+              'image_url', pi.image_url,
+              'thumbnail_url', pi.thumbnail_url,
+              'is_primary', pi.is_primary,
+              'upload_order', pi.upload_order,
+              'file_size', pi.file_size,
+              'storage_path', pi.storage_path,
+              'created_at', pi.created_at
+            )
+          ) FILTER (WHERE pi.id IS NOT NULL),
+          '[]'
+        ) as images
+      FROM products p
+      LEFT JOIN university_halls h ON p.hall_id = h.id
+      LEFT JOIN students s ON p.student_id = s.student_id
+      LEFT JOIN product_images pi ON p.id = pi.product_id
+      WHERE ${whereClause}
+      GROUP BY p.id, h.full_name, s.first_name, s.last_name
+      ORDER BY p.last_bumped_at DESC
+      LIMIT ${limitPlaceholder}
+      OFFSET ${offsetPlaceholder}
+    `;
+
+    const [countResult, dataResult] = await Promise.all([
+      pool.query(countQuery, values),
+      pool.query(dataQuery, [...values, limit, offset]),
+    ]);
+
+    const total = countResult.rows?.[0]?.total || 0;
+    const products = dataResult.rows.map(row => ({
+      ...row,
+      images: Array.isArray(row.images) ? row.images : []
+    }));
+
+    return {
+      products,
+      total,
+      limit,
+      offset,
+      hasMore: offset + products.length < total,
+    };
+  } catch (error) {
+    console.error('Database error in getAllProductsPaginated:', error);
     throw error;
   }
 };

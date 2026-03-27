@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import cors from 'cors';
+import compression from 'compression';
 import express, { Request, Response } from 'express';
 import path, { dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -104,6 +105,11 @@ app.use(cors({
   },
   credentials: true,
 }));
+
+const compressionEnabled = process.env.ENABLE_HTTP_COMPRESSION !== 'false';
+if (compressionEnabled) {
+  app.use('/api', compression());
+}
 
 // ESM-friendly __dirname
 const __filename = fileURLToPath(import.meta.url);

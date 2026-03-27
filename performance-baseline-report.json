@@ -1,0 +1,64 @@
+{
+  "generatedAt": "2026-03-26T19:35:56.045Z",
+  "baseUrl": "http://localhost:5000",
+  "iterations": 15,
+  "warmupRequests": 3,
+  "results": [
+    {
+      "endpoint": "/api/home/critical?limit=10",
+      "iterations": 15,
+      "successCount": 15,
+      "failureCount": 0,
+      "sampleError": null,
+      "minMs": 2.11,
+      "maxMs": 3.11,
+      "avgMs": 2.54,
+      "p50Ms": 2.59,
+      "p95Ms": 3.11,
+      "avgPayloadBytes": 11507,
+      "maxPayloadBytes": 11507
+    },
+    {
+      "endpoint": "/api/home/sections?limit=10",
+      "iterations": 15,
+      "successCount": 15,
+      "failureCount": 0,
+      "sampleError": null,
+      "minMs": 1.62,
+      "maxMs": 2.78,
+      "avgMs": 2.11,
+      "p50Ms": 2.04,
+      "p95Ms": 2.78,
+      "avgPayloadBytes": 7492,
+      "maxPayloadBytes": 7492
+    },
+    {
+      "endpoint": "/api/home?page=1&limit=10",
+      "iterations": 15,
+      "successCount": 15,
+      "failureCount": 0,
+      "sampleError": null,
+      "minMs": 1.9,
+      "maxMs": 3.69,
+      "avgMs": 2.55,
+      "p50Ms": 2.45,
+      "p95Ms": 3.69,
+      "avgPayloadBytes": 13320,
+      "maxPayloadBytes": 13320
+    },
+    {
+      "endpoint": "/api/products?limit=20&offset=0",
+      "iterations": 15,
+      "successCount": 15,
+      "failureCount": 0,
+      "sampleError": null,
+      "minMs": 3.04,
+      "maxMs": 4.14,
+      "avgMs": 3.44,
+      "p50Ms": 3.38,
+      "p95Ms": 4.14,
+      "avgPayloadBytes": 5470,
+      "maxPayloadBytes": 5470
+    }
+  ]
+}

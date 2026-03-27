@@ -2,8 +2,10 @@
 import { Request, Response } from 'express';
 import { AuthRequest } from '../middleware/authMiddleware.js';
 import { pool } from '../db.js';
+import { logPerf } from '../utils/perfLogger.js';
 import {
   getAllProducts,
+  getAllProductsPaginated,
   getProductById,
   getProductsByStudent,
   createProduct,
@@ -24,8 +26,37 @@ import {
 
 // GET: All available products (excluding user's own products)
 export const getAllAvailableProducts = async (req: Request, res: Response): Promise<void> => {
+  const startedAt = Date.now();
   try {
     const excludeStudentId = req.query.excludeStudentId as string;
+
+    const limitParam = req.query.limit as string | undefined;
+    const offsetParam = req.query.offset as string | undefined;
+    const parsedLimit = limitParam ? parseInt(limitParam, 10) : undefined;
+    const parsedOffset = offsetParam ? parseInt(offsetParam, 10) : 0;
+
+    const shouldPaginate = Number.isFinite(parsedLimit) && (parsedLimit as number) > 0;
+
+    if (shouldPaginate) {
+      const paginated = await getAllProductsPaginated({
+        limit: parsedLimit as number,
+        offset: Number.isFinite(parsedOffset) && parsedOffset >= 0 ? parsedOffset : 0,
+        excludeStudentId,
+      });
+
+      res.status(200).json({
+        success: true,
+        count: paginated.products.length,
+        total_count: paginated.total,
+        has_more: paginated.hasMore,
+        limit: paginated.limit,
+        offset: paginated.offset,
+        products: paginated.products,
+      });
+      logPerf(`GET /api/products paginated limit=${paginated.limit} offset=${paginated.offset}`, startedAt);
+      return;
+    }
+
     const products = await getAllProducts(excludeStudentId);
 
     res.status(200).json({
@@ -33,6 +64,7 @@ export const getAllAvailableProducts = async (req: Request, res: Response): Prom
       count: products.length,
       products
     });
+    logPerf('GET /api/products full-list', startedAt);
   } catch (error) {
     console.error('❌ Error fetching products:', error);
     res.status(500).json({
