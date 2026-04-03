@@ -107,7 +107,7 @@ export const createOrder = async (req: Request, res: Response): Promise<void> =>
         orderNumber, customer_id, seller_id, product_id, quantity,
         unit_price, total_price, delivery_option, delivery_fee || 0,
         'confirmed', // Always set status to confirmed for both delivery and pickup
-        delivery_option === 'delivery' ? 'pending' : 'paid', // Set payment_status to pending if delivery, paid if pickup
+        'pending', // Pickup and delivery are both paid only after fulfillment confirmation
         delivery_hall_id, delivery_room_number,
         special_instructions
       ];
@@ -380,6 +380,7 @@ export const updateOrderStatus = async (req: Request, res: Response): Promise<vo
   try {
     const { id } = req.params;
     const { status } = req.body;
+    const actorId = (req as any).user?.student_id;
 
     if (!status || !['pending', 'confirmed', 'assigned', 'in_progress', 'delivered', 'cancelled'].includes(status)) {
       res.status(400).json({
@@ -389,12 +390,48 @@ export const updateOrderStatus = async (req: Request, res: Response): Promise<vo
       return;
     }
 
-    const updateQuery = `
-      UPDATE orders
-      SET status = $1, updated_at = CURRENT_TIMESTAMP
-      WHERE id = $2
-      RETURNING *
-    `;
+    const existingOrderResult = await pool.query(
+      'SELECT id, seller_id, delivery_option, payment_status FROM orders WHERE id = $1',
+      [id]
+    );
+
+    if (existingOrderResult.rows.length === 0) {
+      res.status(404).json({
+        success: false,
+        message: 'Order not found'
+      });
+      return;
+    }
+
+    const existingOrder = existingOrderResult.rows[0];
+
+    // For pickup orders, only the seller can mark the order delivered (this action also confirms payment).
+    if (
+      status === 'delivered' &&
+      existingOrder.delivery_option === 'pickup' &&
+      actorId !== existingOrder.seller_id
+    ) {
+      res.status(403).json({
+        success: false,
+        message: 'Only the seller can confirm pickup handoff and payment.'
+      });
+      return;
+    }
+
+    const shouldMarkPaidForPickup = status === 'delivered' && existingOrder.delivery_option === 'pickup';
+    const updateQuery = shouldMarkPaidForPickup
+      ? `
+        UPDATE orders
+        SET status = $1, payment_status = 'paid', updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2
+        RETURNING *
+      `
+      : `
+        UPDATE orders
+        SET status = $1, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2
+        RETURNING *
+      `;
 
     const result = await pool.query(updateQuery, [status, id]);
 

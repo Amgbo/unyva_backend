@@ -428,7 +428,7 @@ export const checkoutCart = async (req: AuthRequest, res: Response): Promise<voi
         const orderValues = [
           orderNumber, studentId, seller_id, item.product_id, item.quantity,
           unit_price, total_price, delivery_option, delivery_fee || 0,
-          'confirmed', 'paid', delivery_hall_id, delivery_room_number,
+          'confirmed', 'pending', delivery_hall_id, delivery_room_number,
           special_instructions
         ];
 
