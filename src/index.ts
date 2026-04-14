@@ -46,7 +46,7 @@ app.set('trust proxy', 1);
 
 // Server variable to be used in signal handlers
 let server: any;
-let notificationProcessorInterval: ReturnType<typeof setInterval> | null = null;
+let notificationProcessorInterval: ReturnType<typeof setTimeout> | null = null;
 let notificationCleanupInterval: ReturnType<typeof setInterval> | null = null;
 let isShuttingDown = false;
 
@@ -219,10 +219,14 @@ app.use((err: any, req: Request, res: Response, _next: any) => {
       // Start notification processor to handle pending/scheduled notifications
       let processorRunning = false;
       let processorErrors = 0;
+      const minProcessorIntervalMs = Number(process.env.NOTIFICATION_PROCESSOR_MIN_INTERVAL_MS) || 300000; // 5 min
+      const maxProcessorIntervalMs = Number(process.env.NOTIFICATION_PROCESSOR_MAX_INTERVAL_MS) || 1800000; // 30 min
+      let currentProcessorIntervalMs = minProcessorIntervalMs;
 
-      notificationProcessorInterval = setInterval(async () => {
+      const runNotificationProcessor = async () => {
         if (processorRunning) {
           console.warn('⚠️ Previous notification processor still running, skipping this cycle');
+          notificationProcessorInterval = setTimeout(runNotificationProcessor, currentProcessorIntervalMs);
           return;
         }
         
@@ -231,9 +235,14 @@ app.use((err: any, req: Request, res: Response, _next: any) => {
           const startTime = Date.now();
           const result = await notificationService.processPendingNotifications();
           // Only log if work was actually done
-          if (result && result.processed > 0) {
+          if (result && (result.processed > 0 || result.failed > 0)) {
             const duration = Date.now() - startTime;
-            console.log(`✅ Notification processor completed in ${duration}ms (processed: ${result.processed})`);
+            console.log(`✅ Notification processor completed in ${duration}ms (processed: ${result.processed}, failed: ${result.failed})`);
+            // Work found: reset to minimum interval for responsive follow-up processing
+            currentProcessorIntervalMs = minProcessorIntervalMs;
+          } else {
+            // No work: exponentially back off polling to save DB credits
+            currentProcessorIntervalMs = Math.min(currentProcessorIntervalMs * 2, maxProcessorIntervalMs);
           }
           processorErrors = 0; // Reset error counter on success
         } catch (error) {
@@ -247,8 +256,15 @@ app.use((err: any, req: Request, res: Response, _next: any) => {
           }
         } finally {
           processorRunning = false;
+
+          if (!isShuttingDown) {
+            notificationProcessorInterval = setTimeout(runNotificationProcessor, currentProcessorIntervalMs);
+          }
         }
-      }, 300000); // Process every 5 minutes (300 seconds)
+      };
+
+      // Start with minimum interval; then adapt based on queue activity
+      notificationProcessorInterval = setTimeout(runNotificationProcessor, minProcessorIntervalMs);
 
       // Start notification cleanup job (daily)
       notificationCleanupInterval = setInterval(async () => {
@@ -275,7 +291,7 @@ const shutdown = async (signal: 'SIGTERM' | 'SIGINT') => {
   console.log(`${signal} signal received: closing HTTP server`);
 
   if (notificationProcessorInterval) {
-    clearInterval(notificationProcessorInterval);
+    clearTimeout(notificationProcessorInterval);
     notificationProcessorInterval = null;
   }
 
