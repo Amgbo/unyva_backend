@@ -207,6 +207,7 @@ export class NotificationModel {
       WHERE status = 'pending'
       AND (scheduled_at IS NULL OR scheduled_at <= CURRENT_TIMESTAMP)
       ORDER BY priority DESC, created_at ASC
+      LIMIT 100
     `;
 
     const result = await pool.query(query);

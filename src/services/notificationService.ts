@@ -307,9 +307,17 @@ export class NotificationService {
    * Process pending notifications (for scheduled notifications)
    * Uses exponential backoff for retries
    */
-  async processPendingNotifications(): Promise<void> {
+  async processPendingNotifications(): Promise<{ processed: number; failed: number }> {
+    let processed = 0;
+    let failed = 0;
+    
     try {
       const pendingNotifications = await NotificationModel.getPendingNotifications();
+
+      // Early exit if no pending notifications
+      if (pendingNotifications.length === 0) {
+        return { processed: 0, failed: 0 };
+      }
 
       for (const notification of pendingNotifications) {
         try {
@@ -326,7 +334,9 @@ export class NotificationService {
           }
 
           await this.sendNotification(notification);
+          processed++;
         } catch (error) {
+          failed++;
           console.error(`Failed to send notification ${notification.id}:`, error);
 
           // Increment retry count
@@ -350,6 +360,8 @@ export class NotificationService {
     } catch (error) {
       console.error('Error processing pending notifications:', error);
     }
+    
+    return { processed, failed };
   }
 
   /**

@@ -229,9 +229,12 @@ app.use((err: any, req: Request, res: Response, _next: any) => {
         processorRunning = true;
         try {
           const startTime = Date.now();
-          await notificationService.processPendingNotifications();
-          const duration = Date.now() - startTime;
-          console.log(`✅ Notification processor completed in ${duration}ms`);
+          const result = await notificationService.processPendingNotifications();
+          // Only log if work was actually done
+          if (result && result.processed > 0) {
+            const duration = Date.now() - startTime;
+            console.log(`✅ Notification processor completed in ${duration}ms (processed: ${result.processed})`);
+          }
           processorErrors = 0; // Reset error counter on success
         } catch (error) {
           processorErrors++;
@@ -245,7 +248,7 @@ app.use((err: any, req: Request, res: Response, _next: any) => {
         } finally {
           processorRunning = false;
         }
-      }, 30000); // Process every 30 seconds
+      }, 300000); // Process every 5 minutes (300 seconds)
 
       // Start notification cleanup job (daily)
       notificationCleanupInterval = setInterval(async () => {
