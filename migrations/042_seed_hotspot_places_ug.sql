@@ -1,0 +1,57 @@
+-- Migration 042: Seed University of Ghana (Legon) campus places for offline-first location resolution.
+
+BEGIN;
+
+INSERT INTO hotspot_places (name, latitude, longitude, radius_meters)
+VALUES
+  ('Balme Library', 5.651860, -0.186520, 130),
+  ('JQB (Jubilee Hall Quadrangle Block)', 5.651220, -0.184630, 90),
+  ('Night Market', 5.650120, -0.186980, 120),
+  ('Bush Canteen', 5.648950, -0.187420, 100),
+  ('Commonwealth Hall', 5.649420, -0.186060, 160),
+  ('Mensah Sarbah Hall', 5.648560, -0.184910, 160),
+  ('Legon Hall', 5.650780, -0.183840, 170),
+  ('Akuafo Hall', 5.651020, -0.182720, 170),
+  ('Volta Hall', 5.652010, -0.181910, 150),
+  ('Hilla Limann Hall', 5.653060, -0.180740, 170),
+  ('Jean Nelson Hall', 5.653380, -0.179960, 140),
+  ('Elizabeth Sey Hall', 5.652820, -0.180260, 140),
+  ('Pentagon Hostel', 5.651630, -0.181040, 120),
+  ('Evandy Hostel', 5.647820, -0.189240, 110),
+  ('TF Hostel', 5.646980, -0.188320, 110),
+  ('Diaspora Halls', 5.654120, -0.179120, 170),
+  ('University Hospital', 5.651350, -0.187940, 130),
+  ('UG Medical Centre', 5.651010, -0.188530, 130),
+  ('Great Hall', 5.651980, -0.184960, 120),
+  ('School of Engineering Sciences', 5.652710, -0.185420, 180),
+  ('Department of Computer Engineering', 5.652980, -0.185610, 100),
+  ('Department of Computer Science', 5.652860, -0.185120, 100),
+  ('School of Physical and Mathematical Sciences', 5.653220, -0.184420, 170),
+  ('School of Biological Sciences', 5.654010, -0.186020, 160),
+  ('School of Pharmacy', 5.654580, -0.183980, 130),
+  ('School of Law', 5.652420, -0.183120, 130),
+  ('Business School', 5.651740, -0.182120, 150),
+  ('Graduate School', 5.652610, -0.183780, 120),
+  ('Noguchi Memorial Institute', 5.654420, -0.188420, 180),
+  ('Central Cafeteria (CC)', 5.651260, -0.185920, 120),
+  ('Banking Square', 5.651120, -0.181520, 100),
+  ('Okponglo', 5.650030, -0.180040, 200),
+  ('Athletic Oval', 5.652160, -0.187120, 180),
+  ('University Sports Stadium', 5.652640, -0.187780, 200),
+  ('Department of Geography', 5.653340, -0.184960, 90),
+  ('Department of Statistics', 5.653080, -0.184020, 90),
+  ('Department of Mathematics', 5.653220, -0.184240, 90),
+  ('Department of Physics', 5.653560, -0.184520, 90),
+  ('Department of Chemistry', 5.653840, -0.184760, 90),
+  ('Institute of Statistical, Social and Economic Research (ISSER)', 5.654260, -0.183440, 140),
+  ('Main Gate', 5.649360, -0.187020, 160),
+  ('Legon Police Station', 5.649980, -0.186620, 100),
+  ('University Guest Centre', 5.650560, -0.186260, 110),
+  ('Fire Station', 5.650180, -0.186420, 100),
+  ('Night Bus Stop', 5.650420, -0.185520, 90),
+  ('Main Bus Terminal', 5.651020, -0.186720, 130),
+  ('SRC Office', 5.651460, -0.184220, 90),
+  ('Student Affairs Directorate', 5.651680, -0.184380, 100)
+ON CONFLICT DO NOTHING;
+
+COMMIT;

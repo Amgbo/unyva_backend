@@ -1,0 +1,6 @@
+// middleware/multer.ts
+import multer from "multer";
+
+const upload = multer({ storage: multer.memoryStorage() });
+
+export { upload };
