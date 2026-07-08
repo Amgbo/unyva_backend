@@ -135,6 +135,11 @@ app.use(express.urlencoded({ extended: true }));
 // Serve uploaded files statically
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
+// Serve backend-owned app logo used by download page
+app.get('/unyva-logo.png', (_: Request, res: Response) => {
+  res.sendFile(path.join(__dirname, '../web-payment/unyva-logo.png'));
+});
+
 // Payment routes (registered above so webhook raw body middleware works correctly)
 
 // Routes
