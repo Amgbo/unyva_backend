@@ -345,109 +345,11 @@ async function initializeDatabase() {
       }
     }
 
-    // --- Hotspot tables: campus_zones, campus_rooms, network_readings ---
-    console.log('Checking hotspot tables (campus_zones, campus_rooms, network_readings)...');
-
-    const zonesTableCheck = await pool.query(`
-      SELECT EXISTS (
-        SELECT FROM information_schema.tables
-        WHERE table_name = 'campus_zones'
-      );
-    `);
-
-    if (!zonesTableCheck.rows[0].exists) {
-      console.log('❌ campus_zones table does not exist! Creating...');
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS campus_zones (
-          id SERIAL PRIMARY KEY,
-          name VARCHAR(200) NOT NULL UNIQUE,
-          center_lat DOUBLE PRECISION,
-          center_lon DOUBLE PRECISION,
-          radius_m INTEGER DEFAULT 50,
-          metadata JSONB DEFAULT '{}'::jsonb,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-      `);
-
-      console.log('✅ campus_zones table created');
-
-      // Seed a placeholder zone for Legon central area
-      await pool.query(`
-        INSERT INTO campus_zones (name, center_lat, center_lon, radius_m)
-        VALUES ($1,$2,$3,$4)
-        ON CONFLICT (name) DO NOTHING;
-      `, ['Legon Central', 5.6500, -0.1860, 1500]);
-      console.log('✅ Seeded campus_zones sample data');
-    } else {
-      console.log('✅ campus_zones table already exists');
-    }
-
-    const roomsTableCheck = await pool.query(`
-      SELECT EXISTS (
-        SELECT FROM information_schema.tables
-        WHERE table_name = 'campus_rooms'
-      );
-    `);
-
-    if (!roomsTableCheck.rows[0].exists) {
-      console.log('❌ campus_rooms table does not exist! Creating...');
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS campus_rooms (
-          id SERIAL PRIMARY KEY,
-          zone_id INTEGER REFERENCES campus_zones(id) ON DELETE CASCADE,
-          name VARCHAR(200) NOT NULL,
-          floor INTEGER DEFAULT NULL,
-          metadata JSONB DEFAULT '{}'::jsonb,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          UNIQUE(zone_id, name)
-        );
-      `);
-
-      console.log('✅ campus_rooms table created');
-    } else {
-      console.log('✅ campus_rooms table already exists');
-    }
-
-    // NOTE: The new crowdsourced hotspot system does not rely on hardcoded
-    // campus zones or rooms. Measurements are tagged to hotspot_buildings /
-    // hotspot_rooms via GPS inference and aggregated from real user data.
-    // The legacy campus_zones / campus_rooms tables are kept only for
-    // backwards compatibility with any existing network_readings rows.
-    console.log('ℹ️ Skipping legacy hotspot zone/room seeding — recommendations are now driven by live measurements.');
-
-    const readingsTableCheck = await pool.query(`
-      SELECT EXISTS (
-        SELECT FROM information_schema.tables
-        WHERE table_name = 'network_readings'
-      );
-    `);
-
-    if (!readingsTableCheck.rows[0].exists) {
-      console.log('❌ network_readings table does not exist! Creating...');
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS network_readings (
-          id SERIAL PRIMARY KEY,
-          student_id VARCHAR(20) REFERENCES students(student_id) ON DELETE SET NULL,
-          zone_id INTEGER REFERENCES campus_zones(id) ON DELETE SET NULL,
-          room_id INTEGER REFERENCES campus_rooms(id) ON DELETE SET NULL,
-          lat DOUBLE PRECISION,
-          lon DOUBLE PRECISION,
-          carrier VARCHAR(100),
-          network_type VARCHAR(50),
-          dbm INTEGER,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-      `);
-
-      // Add helpful indexes
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_network_readings_zone_id ON network_readings(zone_id);`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_network_readings_carrier ON network_readings(carrier);`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_network_readings_created_at ON network_readings(created_at);`);
-
-      console.log('✅ network_readings table and indexes created');
-    } else {
-      console.log('✅ network_readings table already exists');
-    }
+    // --- Hotspot module ---
+    // The legacy campus_zones / campus_rooms / network_readings tables have
+    // been replaced by the PostGIS-based hotspot schema. Schema creation and
+    // seeding are managed by migrations/SQL files, not runtime initialization.
+    console.log('✅ Hotspot module uses PostGIS schema (managed by migrations)');
 
     console.log('🎉 Database initialization completed successfully!');
 

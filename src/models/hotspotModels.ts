@@ -85,9 +85,9 @@ export interface Measurement {
   signal_quality: number; // 0-100
   network_type: '2G' | '3G' | '4G' | '5G' | 'LTE';
   measurement_timestamp: Date;
-  accuracy?: number;
+  accuracy?: number | null;
   upload_status: 'pending' | 'uploaded' | 'failed';
-  idempotency_key?: string;
+  idempotency_key?: string | null;
 
   // Google Reverse Geocoding enrichment (nullable; must never break uploads)
   place_name?: string | null;
@@ -465,23 +465,40 @@ export class MeasurementModel {
         place_name, formatted_address, google_place_id
       )
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+      ON CONFLICT (idempotency_key) DO UPDATE SET
+        user_id = EXCLUDED.user_id,
+        carrier_id = EXCLUDED.carrier_id,
+        device_profile_id = EXCLUDED.device_profile_id,
+        room_id = EXCLUDED.room_id,
+        building_id = EXCLUDED.building_id,
+        latitude = EXCLUDED.latitude,
+        longitude = EXCLUDED.longitude,
+        signal_strength = EXCLUDED.signal_strength,
+        signal_quality = EXCLUDED.signal_quality,
+        network_type = EXCLUDED.network_type,
+        measurement_timestamp = EXCLUDED.measurement_timestamp,
+        accuracy = EXCLUDED.accuracy,
+        upload_status = EXCLUDED.upload_status,
+        place_name = EXCLUDED.place_name,
+        formatted_address = EXCLUDED.formatted_address,
+        google_place_id = EXCLUDED.google_place_id
       RETURNING *
     `;
     const result = await pool.query(query, [
       measurement.user_id,
       measurement.carrier_id,
       measurement.device_profile_id,
-      measurement.room_id,
-      measurement.building_id,
+      measurement.room_id ?? null,
+      measurement.building_id ?? null,
       measurement.latitude,
       measurement.longitude,
       measurement.signal_strength,
       measurement.signal_quality,
       measurement.network_type,
       measurement.measurement_timestamp,
-      measurement.accuracy,
+      measurement.accuracy ?? null,
       measurement.upload_status,
-      measurement.idempotency_key,
+      measurement.idempotency_key ?? null,
       measurement.place_name ?? null,
       measurement.formatted_address ?? null,
       measurement.google_place_id ?? null
@@ -499,9 +516,10 @@ export class MeasurementModel {
     offset?: number;
     carrierId?: number;
     buildingId?: number;
+    roomId?: number;
   } = {}): Promise<Measurement[]> {
-    const { limit = 100, offset = 0, carrierId, buildingId } = options;
-    
+    const { limit = 100, offset = 0, carrierId, buildingId, roomId } = options;
+
     let query = 'SELECT * FROM hotspot_measurements WHERE user_id = $1';
     const params: any[] = [userId];
     let paramIndex = 2;
@@ -515,6 +533,12 @@ export class MeasurementModel {
     if (buildingId) {
       query += ` AND building_id = $${paramIndex}`;
       params.push(buildingId);
+      paramIndex++;
+    }
+
+    if (roomId) {
+      query += ` AND room_id = $${paramIndex}`;
+      params.push(roomId);
       paramIndex++;
     }
 
@@ -558,6 +582,70 @@ export class MeasurementModel {
 
     const result = await pool.query(query, params);
     return parseInt(result.rows[0].count);
+  }
+
+  /**
+   * Resolve raw GPS-only measurements to PostGIS building/room geometries.
+   * Useful for backfilling building_id/room_id on historical rows after
+   * building/room polygons are added or updated.
+   */
+  static async resolveBuildingsAndRooms(limit: number = 1000): Promise<number> {
+    const findQuery = `
+      SELECT m.id, m.latitude, m.longitude
+      FROM hotspot_measurements m
+      WHERE m.building_id IS NULL
+        AND m.latitude IS NOT NULL
+        AND m.longitude IS NOT NULL
+      ORDER BY m.measurement_timestamp DESC
+      LIMIT $1
+    `;
+    const findResult = await pool.query(findQuery, [limit]);
+
+    let updated = 0;
+    for (const row of findResult.rows) {
+      const pointWkt = `POINT(${row.longitude} ${row.latitude})`;
+
+      const roomResult = await pool.query(
+        `
+          SELECT r.id AS room_id, f.building_id
+          FROM hotspot_rooms r
+          JOIN hotspot_floors f ON f.id = r.floor_id
+          JOIN hotspot_buildings b ON b.id = f.building_id
+          WHERE r.is_active = true AND b.is_active = true
+            AND ST_Contains(r.geometry, ST_SetSRID(ST_GeomFromText($1), 4326))
+          LIMIT 1
+        `,
+        [pointWkt]
+      );
+
+      const buildingResult = await pool.query(
+        `
+          SELECT id AS building_id
+          FROM hotspot_buildings
+          WHERE is_active = true
+            AND ST_Contains(polygon_geometry, ST_SetSRID(ST_GeomFromText($1), 4326))
+          LIMIT 1
+        `,
+        [pointWkt]
+      );
+
+      const roomId = roomResult.rows[0]?.room_id ?? null;
+      const buildingId = roomResult.rows[0]?.building_id ?? buildingResult.rows[0]?.building_id ?? null;
+
+      if (buildingId || roomId) {
+        await pool.query(
+          `
+            UPDATE hotspot_measurements
+            SET building_id = $1, room_id = $2
+            WHERE id = $3
+          `,
+          [buildingId, roomId, row.id]
+        );
+        updated++;
+      }
+    }
+
+    return updated;
   }
 }
 

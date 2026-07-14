@@ -18,6 +18,12 @@ import { aggregationQueue } from '../services/aggregationQueue.js';
 import { aggregationService } from '../services/aggregationService.js';
 import { resolveLocation } from '../services/locationResolutionService.js';
 
+// Ingestion options: when true, the measurement upload path resolves each
+// GPS point to a PostGIS building/room and stores the resolved IDs on the
+// hotspot_measurements row. This enables building/room analytics while still
+// keeping the nearby recommendation engine GPS-first.
+const ENABLE_POSTGIS_RESOLUTION = true;
+
 const normalizeIdentifier = (value: string): string => {
   const raw = String(value || '').trim();
   if (!raw) return raw;
@@ -288,7 +294,7 @@ export const submitMeasurements = async (req: any, res: Response): Promise<void>
         continue;
       }
 
-      // GPS-first: latitude/longitude are required. No building/room inference.
+      // GPS-first: latitude/longitude are required.
       const latN = Number(measurement.latitude);
       const lngN = Number(measurement.longitude);
       if (!Number.isFinite(latN) || !Number.isFinite(lngN)) {
@@ -304,13 +310,35 @@ export const submitMeasurements = async (req: any, res: Response): Promise<void>
         }
         seenIdempotencyKeys.add(idempotencyKey);
 
+        // Optional PostGIS building/room resolution. This is done locally from
+        // the DB only (no external API calls) so it never blocks or fails the
+        // upload path. If no geometry matches, the measurement remains GPS-only.
+        let resolvedBuildingId: number | null = null;
+        let resolvedRoomId: number | null = null;
+        let placeName: string | null = null;
+        let formattedAddress: string | null = null;
+        let googlePlaceId: string | null = null;
+
+        if (ENABLE_POSTGIS_RESOLUTION) {
+          try {
+            const resolved = await resolveLocation(latN, lngN);
+            resolvedBuildingId = resolved.building_id;
+            resolvedRoomId = resolved.room_id;
+            placeName = resolved.place_name;
+            formattedAddress = resolved.formatted_address;
+            googlePlaceId = resolved.google_place_id;
+          } catch (resolveError) {
+            // Resolution is best-effort; never fail the upload because of it.
+            console.warn('[Hotspot] PostGIS resolution failed for upload:', resolveError);
+          }
+        }
+
         const created = await MeasurementModel.create({
           user_id: studentId,
           carrier_id: measurement.carrier_id,
           device_profile_id: deviceProfile.id!,
-          // GPS-first: do not attach building/room context.
-          room_id: null,
-          building_id: null,
+          room_id: resolvedRoomId,
+          building_id: resolvedBuildingId,
           latitude: latN,
           longitude: lngN,
           signal_strength: resolvedSignalStrength,
@@ -320,9 +348,9 @@ export const submitMeasurements = async (req: any, res: Response): Promise<void>
           accuracy: measurement.accuracy || null,
           upload_status: 'uploaded',
           idempotency_key: idempotencyKey,
-          place_name: null,
-          formatted_address: null,
-          google_place_id: null
+          place_name: placeName,
+          formatted_address: formattedAddress,
+          google_place_id: googlePlaceId
         });
 
         createdMeasurements.push(created);

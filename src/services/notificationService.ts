@@ -786,6 +786,129 @@ export class NotificationService {
 
     return this.createAndSend(notificationData);
   }
+
+  /**
+   * Companion: notify guide about a new booking request
+   */
+  async createCompanionBookingRequestNotification(
+    guideStudentId: string,
+    bookingId: string,
+    freshmanName: string,
+    helpCategory: string
+  ): Promise<any> {
+    const title = 'New Companion Request';
+    const message = `${freshmanName || 'A student'} requested help with ${helpCategory || 'a session'}`;
+
+    const notificationData: CreateNotificationData = {
+      user_id: guideStudentId,
+      type: 'companion_booking',
+      title,
+      message,
+      data: {
+        booking_id: bookingId,
+        action: 'booking_requested',
+        screen: 'companion/guide-dashboard'
+      },
+      priority: 'high',
+      delivery_methods: ['push']
+    };
+
+    return this.createAndSend(notificationData);
+  }
+
+  /**
+   * Companion: notify freshman about booking status change
+   */
+  async createCompanionBookingStatusNotification(
+    freshmanId: string,
+    bookingId: string,
+    status: 'accepted' | 'declined' | 'cancelled',
+    guideName: string
+  ): Promise<any> {
+    const statusMessages = {
+      accepted: `${guideName || 'Your guide'} accepted your booking request`,
+      declined: `${guideName || 'Your guide'} declined your booking request`,
+      cancelled: 'Your booking was cancelled'
+    };
+
+    const title = 'Booking Update';
+    const message = statusMessages[status] || `Your booking status changed to ${status}`;
+
+    const notificationData: CreateNotificationData = {
+      user_id: freshmanId,
+      type: 'companion_booking',
+      title,
+      message,
+      data: {
+        booking_id: bookingId,
+        action: `booking_${status}`,
+        screen: 'companion/guide-dashboard'
+      },
+      priority: 'high',
+      delivery_methods: ['push']
+    };
+
+    return this.createAndSend(notificationData);
+  }
+
+  /**
+   * Companion: notify receiver about a new chat message
+   */
+  async createCompanionMessageNotification(
+    receiverId: string,
+    senderName: string,
+    bookingId: string,
+    content: string
+  ): Promise<any> {
+    const title = 'New Message';
+    const message = `${senderName || 'Someone'}: ${content || 'New message'}`;
+
+    const notificationData: CreateNotificationData = {
+      user_id: receiverId,
+      type: 'companion_message',
+      title,
+      message,
+      data: {
+        booking_id: bookingId,
+        action: 'new_message',
+        screen: 'companion/booking-detail'
+      },
+      priority: 'medium',
+      delivery_methods: ['push']
+    };
+
+    return this.createAndSend(notificationData);
+  }
+
+  /**
+   * Companion: notify guide about a new review
+   */
+  async createCompanionReviewNotification(
+    guideStudentId: string,
+    guideId: string,
+    rating: number,
+    reviewerName: string
+  ): Promise<any> {
+    const title = 'New Review';
+    const message = `${reviewerName || 'A student'} rated you ${rating} stars`;
+
+    const notificationData: CreateNotificationData = {
+      user_id: guideStudentId,
+      type: 'companion_review',
+      title,
+      message,
+      data: {
+        guide_id: guideId,
+        rating,
+        action: 'new_review',
+        screen: 'companion/guide-profile'
+      },
+      priority: 'medium',
+      delivery_methods: ['push']
+    };
+
+    return this.createAndSend(notificationData);
+  }
 }
 
 // Export singleton instance

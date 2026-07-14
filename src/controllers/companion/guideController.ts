@@ -40,13 +40,15 @@ export async function registerGuideController(req: Request, res: Response) {
 
 export async function listGuidesController(req: Request, res: Response) {
   try {
-    const { department, availability_status, minRating, onlyActive } = req.query as any;
+    const { department, availability_status, minRating, onlyActive, q, hall } = req.query as any;
 
     const guides = await browseGuides({
       department: department || undefined,
       availability_status: availability_status || undefined,
       minRating: minRating !== undefined ? Number(minRating) : undefined,
       onlyActive: onlyActive === 'true' || onlyActive === true,
+      q: q || undefined,
+      hall: hall || undefined,
     });
 
     return res.json({ guides });
@@ -103,11 +105,41 @@ export async function getMyDashboardController(req: Request, res: Response) {
       bookings = result.rows;
     }
 
+    // Compute unread message counts for each booking thread.
+    const bookingIds = bookings.map((b) => b.id);
+    const unreadCounts: Record<string, number> = {};
+    if (bookingIds.length > 0) {
+      const placeholders = bookingIds.map((_, i) => `$${i + 2}`).join(',');
+      const result = await pool.query(
+        `SELECT booking_id, COUNT(*)::int AS count
+         FROM companion_messages
+         WHERE receiver_id = $1 AND is_read = false AND booking_id IN (${placeholders})
+         GROUP BY booking_id;`,
+        [student_id, ...bookingIds]
+      );
+      for (const row of result.rows) {
+        unreadCounts[row.booking_id] = row.count;
+      }
+    }
+
+    // Also count direct-message threads (dm: prefix).
+    const dmResult = await pool.query(
+      `SELECT booking_id, COUNT(*)::int AS count
+       FROM companion_messages
+       WHERE receiver_id = $1 AND is_read = false AND booking_id LIKE 'dm:%'
+       GROUP BY booking_id;`,
+      [student_id]
+    );
+    for (const row of dmResult.rows) {
+      unreadCounts[row.booking_id] = row.count;
+    }
+
     return res.json({
       dashboard: {
         guides,
         guideCount: guides.length,
         bookings,
+        unread_counts: unreadCounts,
       },
     });
   } catch (e: any) {

@@ -30,6 +30,8 @@ export type GuideFilters = {
   availability_status?: 'available' | 'in_class' | 'at_dorm';
   minRating?: number;
   onlyActive?: boolean;
+  q?: string;
+  hall?: string;
 };
 
 export async function createGuide(params: {
@@ -93,7 +95,7 @@ export async function getAllGuides(filters: GuideFilters): Promise<Guide[]> {
 
   if (filters.department) {
     values.push(filters.department);
-    where.push(`g.department = $${values.length}`);
+    where.push(`g.department ILIKE $${values.length}`);
   }
 
   if (filters.availability_status) {
@@ -104,6 +106,28 @@ export async function getAllGuides(filters: GuideFilters): Promise<Guide[]> {
   if (filters.minRating !== undefined) {
     values.push(filters.minRating);
     where.push(`g.rating >= $${values.length}`);
+  }
+
+  if (filters.hall) {
+    values.push(`%${filters.hall}%`);
+    where.push(`(g.hall ILIKE $${values.length} OR s.hall_of_residence ILIKE $${values.length})`);
+  }
+
+  if (filters.q) {
+    const term = `%${filters.q}%`;
+    values.push(term);
+    const idx = values.length;
+    where.push(`(
+      s.first_name ILIKE $${idx}
+      OR s.last_name ILIKE $${idx}
+      OR s.student_id ILIKE $${idx}
+      OR g.department ILIKE $${idx}
+      OR g.bio ILIKE $${idx}
+      OR EXISTS (
+        SELECT 1 FROM UNNEST(g.areas_of_expertise) area
+        WHERE area ILIKE $${idx}
+      )
+    )`);
   }
 
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
@@ -285,6 +309,23 @@ export async function incrementCompletedSessions(params: {
     WHERE id = $2;
     `,
     [delta, guideId]
+  );
+}
+
+export async function updateGuideRating(guideId: string): Promise<void> {
+  await pool.query(
+    `
+    UPDATE guides
+    SET rating = COALESCE(
+      (SELECT AVG(rating)::NUMERIC(3,2)
+       FROM reviews
+       WHERE guide_id = $1),
+      0.00
+    ),
+    updated_at = NOW()
+    WHERE id = $1;
+    `,
+    [guideId]
   );
 }
 
