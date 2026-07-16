@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { pool } from '../db.js';
 import imagekit, { shouldUseImageKit } from '../config/imagekit.js';
 import { getLocalUrl, deleteLocalFile } from '../config/multer.js';
+import { handleControllerError } from '../utils/apiError.js';
 
 // Dummy announcements data for initial testing
 const dummyAnnouncements = [
@@ -41,9 +42,10 @@ export const getAnnouncements = async (req: Request, res: Response): Promise<voi
     });
   } catch (err: any) {
     console.error('❌ Get Announcements Error:', err);
-    res.status(500).json({
-      error: 'Failed to fetch announcements',
-      message: err.message
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to fetch announcements',
+      context: 'announcements/getAnnouncements',
     });
   }
 };
@@ -73,9 +75,10 @@ export const getAnnouncementById = async (req: Request, res: Response): Promise<
     });
   } catch (err: any) {
     console.error('❌ Get Announcement By ID Error:', err);
-    res.status(500).json({
-      error: 'Failed to fetch announcement',
-      message: err.message
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to fetch announcement',
+      context: 'announcements/getAnnouncementById',
     });
   }
 };
@@ -153,9 +156,10 @@ export const addAnnouncement = async (req: any, res: Response): Promise<void> =>
     });
   } catch (err: any) {
     console.error('❌ Add Announcement Error:', err);
-    res.status(500).json({
-      error: 'Failed to add announcement',
-      message: err.message
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to add announcement',
+      context: 'announcements/addAnnouncement',
     });
   }
 };
@@ -223,9 +227,10 @@ export const deleteAnnouncement = async (req: any, res: Response): Promise<void>
     });
   } catch (err: any) {
     console.error('❌ Delete Announcement Error:', err);
-    res.status(500).json({
-      error: 'Failed to delete announcement',
-      message: err.message
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to delete announcement',
+      context: 'announcements/deleteAnnouncement',
     });
   }
 };

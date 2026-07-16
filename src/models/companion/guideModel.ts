@@ -120,7 +120,7 @@ export async function getAllGuides(filters: GuideFilters): Promise<Guide[]> {
     where.push(`(
       s.first_name ILIKE $${idx}
       OR s.last_name ILIKE $${idx}
-      OR s.student_id ILIKE $${idx}
+      OR s.student_id::text ILIKE $${idx}
       OR g.department ILIKE $${idx}
       OR g.bio ILIKE $${idx}
       OR EXISTS (

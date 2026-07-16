@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/authMiddleware.js';
 import { ThroneModel } from '../models/throneModel.js';
+import { handleControllerError } from '../utils/apiError.js';
 
 export class ThroneController {
   // Calculate thrones for current week (admin endpoint)
@@ -23,7 +24,11 @@ export class ThroneController {
       res.json({ thrones, weekStart });
     } catch (error) {
       console.error('Error calculating weekly thrones:', error);
-      res.status(500).json({ error: 'Internal server error' });
+      handleControllerError(res, error, {
+        statusCode: 500,
+        publicError: 'Failed to calculate weekly thrones',
+        context: 'throne/calculateWeeklyThrones',
+      });
     }
   }
 
@@ -34,7 +39,11 @@ export class ThroneController {
       res.json({ throneHolders });
     } catch (error) {
       console.error('Error fetching current throne holders:', error);
-      res.status(500).json({ error: 'Internal server error' });
+      handleControllerError(res, error, {
+        statusCode: 500,
+        publicError: 'Failed to fetch throne holders',
+        context: 'throne/getCurrentThroneHolders',
+      });
     }
   }
 
@@ -46,7 +55,11 @@ export class ThroneController {
       res.json({ throneHolders });
     } catch (error) {
       console.error('Error fetching throne holders for week:', error);
-      res.status(500).json({ error: 'Internal server error' });
+      handleControllerError(res, error, {
+        statusCode: 500,
+        publicError: 'Failed to fetch throne holders',
+        context: 'throne/getThroneHoldersForWeek',
+      });
     }
   }
 
@@ -60,7 +73,11 @@ export class ThroneController {
       res.json({ history });
     } catch (error) {
       console.error('Error fetching user throne history:', error);
-      res.status(500).json({ error: 'Internal server error' });
+      handleControllerError(res, error, {
+        statusCode: 500,
+        publicError: 'Failed to fetch throne history',
+        context: 'throne/getUserThroneHistory',
+      });
     }
   }
 
@@ -72,7 +89,11 @@ export class ThroneController {
       res.json({ stats });
     } catch (error) {
       console.error('Error fetching throne stats:', error);
-      res.status(500).json({ error: 'Internal server error' });
+      handleControllerError(res, error, {
+        statusCode: 500,
+        publicError: 'Failed to fetch throne stats',
+        context: 'throne/getThroneStats',
+      });
     }
   }
 
@@ -83,7 +104,11 @@ export class ThroneController {
       res.json({ throneTypes });
     } catch (error) {
       console.error('Error fetching throne types:', error);
-      res.status(500).json({ error: 'Internal server error' });
+      handleControllerError(res, error, {
+        statusCode: 500,
+        publicError: 'Failed to fetch throne types',
+        context: 'throne/getThroneTypes',
+      });
     }
   }
 }

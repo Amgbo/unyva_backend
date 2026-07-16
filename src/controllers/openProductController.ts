@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { getProductById } from '../models/productModel.js';
 
 // Production API URL for constructing full image URLs
-const API_BASE_URL = 'https://unyva.up.railway.app';
+const API_BASE_URL: string = process.env.BASE_URL || '';
 
 export const openProduct = async (req: Request, res: Response): Promise<void> => {
   const { id } = req.query;

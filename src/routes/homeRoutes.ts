@@ -4,6 +4,7 @@ import { getFeaturedProducts, getAllProducts, getRecentProducts } from '../model
 import { getProductCategories } from '../models/categoryModel.js';
 import { getFeaturedServices, getRecentServices } from '../models/serviceModel.js';
 import { pool } from '../db.js';
+import { handleControllerError } from '../utils/apiError.js';
 
 const router = Router();
 
@@ -107,7 +108,11 @@ if (banners.length === 0) {
     });
   } catch (err) {
     console.error('Error fetching home data:', err);
-    res.status(500).json({ message: 'Server error', error: err instanceof Error ? err.message : 'Unknown error' });
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to fetch home data',
+      context: 'homeRoutes/public',
+    });
   }
 });
 
@@ -147,7 +152,11 @@ router.get('/protected', verifyToken, async (req: Request, res: Response) => {
     });
   } catch (err) {
     console.error('Error fetching home data:', err);
-    res.status(500).json({ message: 'Server error', error: err instanceof Error ? err.message : 'Unknown error' });
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to fetch home data',
+      context: 'homeRoutes/protected',
+    });
   }
 });
 

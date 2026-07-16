@@ -37,6 +37,7 @@ import { foundItemsRouter } from './routes/foundItemsRoutes.js';
 import { notificationService } from './services/notificationService.js';
 import { companionRoutes } from './routes/companion/companionRoutes.js';
 import downloadRoutes from './routes/downloadRoutes.js';
+import { errorSanitizer } from './middleware/errorSanitizer.js';
 
 
 
@@ -223,11 +224,8 @@ app.get('/api/test', (_: Request, res: Response) => {
   res.send('✅ Backend is working');
 });
 
-// Error handling middleware
-app.use((err: any, req: Request, res: Response, _next: any) => {
-  console.error('❌ Unhandled error:', err);
-  res.status(500).json({ error: 'Internal server error' });
-});
+// Global sanitized error handling middleware (must be last)
+app.use(errorSanitizer);
 
 // Initialize database and start server
 (async () => {

@@ -1,137 +1,282 @@
-import { Response } from 'express';
-import { AuthRequest } from '../middleware/authMiddleware.js';
-import { DealModel, CreateDealData, UpdateDealConfirmation } from '../models/dealModel.js';
+import { Request, Response } from 'express';
+import { pool } from '../db.js';
+import { handleControllerError } from '../utils/apiError.js';
 
-export class DealController {
-  // Create a new deal (buyer initiates transaction)
-  static async createDeal(req: AuthRequest, res: Response) {
-    try {
-      const { product_id, seller_id }: CreateDealData = req.body;
-      const buyer_id = req.user?.student_id;
+// GET /api/deals - Get all active deals
+export const getDeals = async (_req: Request, res: Response): Promise<void> => {
+  try {
+    console.log('🏷️ Fetching deals...');
 
-      if (!buyer_id) {
-        return res.status(401).json({ error: 'Unauthorized' });
-      }
+    const result = await pool.query(
+      `SELECT d.*, p.title as product_title, p.price as original_price, p.images as product_images
+       FROM deals d
+       JOIN products p ON d.product_id = p.id
+       WHERE d.is_active = true
+       AND (d.end_date IS NULL OR d.end_date > NOW())
+       ORDER BY d.created_at DESC`
+    );
 
-      const deal = await DealModel.createDeal({
-        product_id,
-        buyer_id,
-        seller_id
+    console.log('✅ Deals fetched successfully');
+    res.status(200).json({
+      success: true,
+      deals: result.rows
+    });
+  } catch (err: any) {
+    console.error('❌ Get Deals Error:', err);
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to fetch deals',
+      context: 'deals/getDeals',
+    });
+  }
+};
+
+// GET /api/deals/:id - Get deal by ID
+export const getDealById = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    console.log('🏷️ Fetching deal by ID:', id);
+
+    const result = await pool.query(
+      `SELECT d.*, p.title as product_title, p.price as original_price, p.images as product_images
+       FROM deals d
+       JOIN products p ON d.product_id = p.id
+       WHERE d.id = $1`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      res.status(404).json({
+        error: 'Deal not found'
       });
-
-      res.status(201).json({ deal });
-    } catch (error) {
-      console.error('Error creating deal:', error);
-      res.status(400).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+      return;
     }
+
+    console.log('✅ Deal fetched successfully');
+    res.status(200).json({
+      success: true,
+      deal: result.rows[0]
+    });
+  } catch (err: any) {
+    console.error('❌ Get Deal By ID Error:', err);
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to fetch deal',
+      context: 'deals/getDealById',
+    });
   }
+};
 
-  // Get user's deals
-  static async getUserDeals(req: AuthRequest, res: Response) {
-    try {
-      const userId = req.user?.student_id;
-      const userType = req.query.userType as 'buyer' | 'seller' || 'buyer';
+// POST /api/deals - Add new deal (Admin only)
+export const addDeal = async (req: any, res: Response): Promise<void> => {
+  try {
+    console.log('🏷️ Adding new deal...');
 
-      if (!userId) {
-        return res.status(401).json({ error: 'Unauthorized' });
-      }
+    const { product_id, deal_price, discount_percentage, start_date, end_date } = req.body;
+    const studentId = req.user?.student_id;
 
-      const deals = await DealModel.getUserDeals(userId, userType);
-      res.json({ deals });
-    } catch (error) {
-      console.error('Error fetching user deals:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  }
-
-  // Get deal by ID
-  static async getDealById(req: AuthRequest, res: Response) {
-    try {
-      const dealId = parseInt(req.params.id);
-      const userId = req.user?.student_id;
-
-      if (!userId) {
-        return res.status(401).json({ error: 'Unauthorized' });
-      }
-
-      const deal = await DealModel.getDealById(dealId);
-
-      if (!deal) {
-        return res.status(404).json({ error: 'Deal not found' });
-      }
-
-      // Check if user is part of this deal
-      if (deal.buyer_id !== userId && deal.seller_id !== userId) {
-        return res.status(403).json({ error: 'Unauthorized to view this deal' });
-      }
-
-      res.json({ deal });
-    } catch (error) {
-      console.error('Error fetching deal:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  }
-
-  // Confirm deal (buyer or seller confirms)
-  static async confirmDeal(req: AuthRequest, res: Response) {
-    try {
-      const deal_id = parseInt(req.params.id);
-      const { confirmed }: { confirmed: boolean } = req.body;
-      const user_id = req.user?.student_id;
-
-      if (!user_id) {
-        return res.status(401).json({ error: 'Unauthorized' });
-      }
-
-      // Determine user type
-      const deal = await DealModel.getDealById(deal_id);
-      if (!deal) {
-        return res.status(404).json({ error: 'Deal not found' });
-      }
-
-      let user_type: 'buyer' | 'seller';
-      if (deal.buyer_id === user_id) {
-        user_type = 'buyer';
-      } else if (deal.seller_id === user_id) {
-        user_type = 'seller';
-      } else {
-        return res.status(403).json({ error: 'Unauthorized to confirm this deal' });
-      }
-
-      const updatedDeal = await DealModel.confirmDeal({
-        deal_id,
-        user_id,
-        user_type,
-        confirmed
+    // Validate required fields
+    if (!product_id || !deal_price) {
+      res.status(400).json({
+        error: 'Product ID and deal price are required'
       });
-
-      res.json({ deal: updatedDeal });
-    } catch (error) {
-      console.error('Error confirming deal:', error);
-      res.status(400).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+      return;
     }
-  }
 
-  // Delete deal (if not completed)
-  static async deleteDeal(req: AuthRequest, res: Response) {
-    try {
-      const dealId = parseInt(req.params.id);
-      const userId = req.user?.student_id;
-
-      if (!userId) {
-        return res.status(401).json({ error: 'Unauthorized' });
-      }
-
-      const success = await DealModel.deleteDeal(dealId, userId);
-
-      if (!success) {
-        return res.status(404).json({ error: 'Deal not found or cannot be deleted' });
-      }
-
-      res.json({ message: 'Deal deleted successfully' });
-    } catch (error) {
-      console.error('Error deleting deal:', error);
-      res.status(400).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    // Check if user is admin (student_id '22243185')
+    if (studentId !== '22243185') {
+      console.log('❌ Access denied: Non-admin user attempted to add deal');
+      res.status(403).json({
+        error: 'Access denied. Admin privileges required.'
+      });
+      return;
     }
+
+    // Check if product exists
+    const productResult = await pool.query(
+      'SELECT id, price FROM products WHERE id = $1',
+      [product_id]
+    );
+
+    if (productResult.rows.length === 0) {
+      res.status(404).json({
+        error: 'Product not found'
+      });
+      return;
+    }
+
+    const originalPrice = parseFloat(productResult.rows[0].price);
+    const dealPrice = parseFloat(deal_price);
+
+    if (dealPrice >= originalPrice) {
+      res.status(400).json({
+        error: 'Deal price must be less than original price'
+      });
+      return;
+    }
+
+    // Calculate discount percentage if not provided
+    const discount = discount_percentage || Math.round(((originalPrice - dealPrice) / originalPrice) * 100);
+
+    // Insert into database
+    const result = await pool.query(
+      `INSERT INTO deals (product_id, deal_price, discount_percentage, start_date, end_date, is_active)
+       VALUES ($1, $2, $3, $4, $5, true)
+       RETURNING *`,
+      [product_id, dealPrice, discount, start_date || null, end_date || null]
+    );
+
+    console.log('✅ Deal added successfully');
+    res.status(201).json({
+      success: true,
+      message: 'Deal added successfully',
+      deal: result.rows[0]
+    });
+  } catch (err: any) {
+    console.error('❌ Add Deal Error:', err);
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to add deal',
+      context: 'deals/addDeal',
+    });
   }
-}
+};
+
+// PUT /api/deals/:id - Update deal (Admin only)
+export const updateDeal = async (req: any, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { deal_price, discount_percentage, start_date, end_date, is_active } = req.body;
+    const studentId = req.user?.student_id;
+
+    console.log('🏷️ Updating deal:', id);
+
+    // Check if user is admin (student_id '22243185')
+    if (studentId !== '22243185') {
+      console.log('❌ Access denied: Non-admin user attempted to update deal');
+      res.status(403).json({
+        error: 'Access denied. Admin privileges required.'
+      });
+      return;
+    }
+
+    // Check if deal exists
+    const existingResult = await pool.query(
+      'SELECT id FROM deals WHERE id = $1',
+      [id]
+    );
+
+    if (existingResult.rows.length === 0) {
+      res.status(404).json({
+        error: 'Deal not found'
+      });
+      return;
+    }
+
+    // Build dynamic update query
+    const updates: string[] = [];
+    const values: any[] = [];
+    let paramIndex = 1;
+
+    if (deal_price !== undefined) {
+      updates.push(`deal_price = $${paramIndex++}`);
+      values.push(parseFloat(deal_price));
+    }
+    if (discount_percentage !== undefined) {
+      updates.push(`discount_percentage = $${paramIndex++}`);
+      values.push(discount_percentage);
+    }
+    if (start_date !== undefined) {
+      updates.push(`start_date = $${paramIndex++}`);
+      values.push(start_date);
+    }
+    if (end_date !== undefined) {
+      updates.push(`end_date = $${paramIndex++}`);
+      values.push(end_date);
+    }
+    if (is_active !== undefined) {
+      updates.push(`is_active = $${paramIndex++}`);
+      values.push(is_active);
+    }
+
+    if (updates.length === 0) {
+      res.status(400).json({
+        error: 'No fields to update'
+      });
+      return;
+    }
+
+    values.push(id);
+
+    const query = `
+      UPDATE deals 
+      SET ${updates.join(', ')}
+      WHERE id = $${paramIndex}
+      RETURNING *
+    `;
+
+    const result = await pool.query(query, values);
+
+    console.log('✅ Deal updated successfully');
+    res.status(200).json({
+      success: true,
+      message: 'Deal updated successfully',
+      deal: result.rows[0]
+    });
+  } catch (err: any) {
+    console.error('❌ Update Deal Error:', err);
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to update deal',
+      context: 'deals/updateDeal',
+    });
+  }
+};
+
+// DELETE /api/deals/:id - Delete deal (Admin only)
+export const deleteDeal = async (req: any, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const studentId = req.user?.student_id;
+
+    console.log('🗑️ Deleting deal:', id);
+
+    // Check if user is admin (student_id '22243185')
+    if (studentId !== '22243185') {
+      console.log('❌ Access denied: Non-admin user attempted to delete deal');
+      res.status(403).json({
+        error: 'Access denied. Admin privileges required.'
+      });
+      return;
+    }
+
+    // Check if deal exists
+    const existingResult = await pool.query(
+      'SELECT id FROM deals WHERE id = $1',
+      [id]
+    );
+
+    if (existingResult.rows.length === 0) {
+      res.status(404).json({
+        error: 'Deal not found'
+      });
+      return;
+    }
+
+    // Delete from database
+    await pool.query('DELETE FROM deals WHERE id = $1', [id]);
+
+    console.log('✅ Deal deleted successfully');
+    res.status(200).json({
+      success: true,
+      message: 'Deal deleted successfully'
+    });
+  } catch (err: any) {
+    console.error('❌ Delete Deal Error:', err);
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to delete deal',
+      context: 'deals/deleteDeal',
+    });
+  }
+};

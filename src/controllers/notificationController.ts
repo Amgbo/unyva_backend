@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { notificationService } from '../services/notificationService.js';
 import { NotificationModel } from '../models/notificationModel.js';
+import { handleControllerError } from '../utils/apiError.js';
 
 // Get user's notifications
 export const getUserNotifications = async (req: Request, res: Response) => {
@@ -24,9 +25,10 @@ export const getUserNotifications = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('Error getting user notifications:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to get notifications',
+    handleControllerError(res, error, {
+      statusCode: 500,
+      publicError: 'Failed to get notifications',
+      context: 'notifications/getUserNotifications',
     });
   }
 };
@@ -53,9 +55,10 @@ export const markNotificationAsRead = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('Error marking notification as read:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to mark notification as read',
+    handleControllerError(res, error, {
+      statusCode: 500,
+      publicError: 'Failed to mark notification as read',
+      context: 'notifications/markNotificationAsRead',
     });
   }
 };
@@ -73,9 +76,10 @@ export const markAllNotificationsAsRead = async (req: Request, res: Response) =>
     });
   } catch (error) {
     console.error('Error marking all notifications as read:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to mark all notifications as read',
+    handleControllerError(res, error, {
+      statusCode: 500,
+      publicError: 'Failed to mark all notifications as read',
+      context: 'notifications/markAllNotificationsAsRead',
     });
   }
 };
@@ -101,9 +105,10 @@ export const registerPushToken = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('Error registering push token:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to register push token',
+    handleControllerError(res, error, {
+      statusCode: 500,
+      publicError: 'Failed to register push token',
+      context: 'notifications/registerPushToken',
     });
   }
 };
@@ -139,10 +144,10 @@ export const createTestNotification = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('❌ Error creating test notification:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to create test notification',
-      error: error instanceof Error ? error.message : 'Unknown error',
+    handleControllerError(res, error, {
+      statusCode: 500,
+      publicError: 'Failed to create test notification',
+      context: 'notifications/createTestNotification',
     });
   }
 };
@@ -179,9 +184,10 @@ export const getAllNotifications = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('Error getting all notifications:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to get notifications',
+    handleControllerError(res, error, {
+      statusCode: 500,
+      publicError: 'Failed to get notifications',
+      context: 'notifications/getAllNotifications',
     });
   }
 };
@@ -208,9 +214,10 @@ export const getNotificationStats = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('Error getting notification stats:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to get notification stats',
+    handleControllerError(res, error, {
+      statusCode: 500,
+      publicError: 'Failed to get notification stats',
+      context: 'notifications/getNotificationStats',
     });
   }
 };
@@ -255,9 +262,10 @@ export const sendBroadcastNotification = async (req: Request, res: Response) => 
     });
   } catch (error) {
     console.error('Error sending broadcast notification:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to send broadcast notification',
+    handleControllerError(res, error, {
+      statusCode: 500,
+      publicError: 'Failed to send broadcast notification',
+      context: 'notifications/sendBroadcastNotification',
     });
   }
 };
@@ -298,9 +306,10 @@ export const sendSchoolNotification = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('Error sending school notification:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to send school notification',
+    handleControllerError(res, error, {
+      statusCode: 500,
+      publicError: 'Failed to send school notification',
+      context: 'notifications/sendSchoolNotification',
     });
   }
 };
@@ -329,9 +338,10 @@ export const deleteNotification = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('Error deleting notification:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to delete notification',
+    handleControllerError(res, error, {
+      statusCode: 500,
+      publicError: 'Failed to delete notification',
+      context: 'notifications/deleteNotification',
     });
   }
 };

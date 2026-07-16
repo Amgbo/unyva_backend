@@ -8,6 +8,7 @@ import {
   updateMyGuide,
   toggleMyAvailability,
 } from '../../services/companion/guideService.js';
+import { handleControllerError } from '../../utils/apiError.js';
 
 export async function registerGuideController(req: Request, res: Response) {
   try {
@@ -34,7 +35,11 @@ export async function registerGuideController(req: Request, res: Response) {
     return res.status(201).json({ guide });
   } catch (e: any) {
     console.error('[Companion] registerGuideController error:', e);
-    return res.status(400).json({ error: e.message ?? 'Failed to register guide' });
+    return handleControllerError(res, e, {
+      statusCode: 400,
+      publicError: 'Failed to register guide',
+      context: 'companion/registerGuide',
+    });
   }
 }
 
@@ -53,7 +58,11 @@ export async function listGuidesController(req: Request, res: Response) {
 
     return res.json({ guides });
   } catch (e: any) {
-    return res.status(400).json({ error: e.message ?? 'Failed to list guides' });
+    return handleControllerError(res, e, {
+      statusCode: 400,
+      publicError: 'Failed to list guides',
+      context: 'companion/listGuides',
+    });
   }
 }
 
@@ -65,7 +74,11 @@ export async function getMyGuideController(req: Request, res: Response) {
     const guide = await getMyGuide(student_id);
     return res.json({ guide });
   } catch (e: any) {
-    return res.status(400).json({ error: e.message ?? 'Failed to get guide' });
+    return handleControllerError(res, e, {
+      statusCode: 400,
+      publicError: 'Failed to get guide',
+      context: 'companion/getMyGuide',
+    });
   }
 }
 
@@ -77,7 +90,11 @@ export async function getMyGuidesController(req: Request, res: Response) {
     const guides = await getMyGuides(student_id);
     return res.json({ guides });
   } catch (e: any) {
-    return res.status(400).json({ error: e.message ?? 'Failed to get guides' });
+    return handleControllerError(res, e, {
+      statusCode: 400,
+      publicError: 'Failed to get guides',
+      context: 'companion/getMyGuides',
+    });
   }
 }
 
@@ -143,7 +160,11 @@ export async function getMyDashboardController(req: Request, res: Response) {
       },
     });
   } catch (e: any) {
-    return res.status(400).json({ error: e.message ?? 'Failed to load dashboard' });
+    return handleControllerError(res, e, {
+      statusCode: 400,
+      publicError: 'Failed to load dashboard',
+      context: 'companion/getMyDashboard',
+    });
   }
 }
 
@@ -169,7 +190,11 @@ export async function updateMyGuideController(req: Request, res: Response) {
 
     return res.json({ guide });
   } catch (e: any) {
-    return res.status(400).json({ error: e.message ?? 'Failed to update guide' });
+    return handleControllerError(res, e, {
+      statusCode: 400,
+      publicError: 'Failed to update guide',
+      context: 'companion/updateMyGuide',
+    });
   }
 }
 
@@ -189,7 +214,11 @@ export async function toggleAvailabilityController(req: Request, res: Response) 
 
     return res.json({ guide });
   } catch (e: any) {
-    return res.status(400).json({ error: e.message ?? 'Failed to toggle availability' });
+    return handleControllerError(res, e, {
+      statusCode: 400,
+      publicError: 'Failed to toggle availability',
+      context: 'companion/toggleAvailability',
+    });
   }
 }
 
@@ -210,7 +239,10 @@ export async function getGuideByIdController(req: Request, res: Response) {
 
     return res.json({ guide });
   } catch (e: any) {
-    return res.status(400).json({ error: e.message ?? 'Failed to get guide' });
+    return handleControllerError(res, e, {
+      statusCode: 400,
+      publicError: 'Failed to get guide',
+      context: 'companion/getGuideById',
+    });
   }
 }
-

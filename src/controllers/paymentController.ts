@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import axios from 'axios';
 import { pool } from '../db.js';
 import crypto from 'crypto';
+import { handleControllerError } from '../utils/apiError.js';
 
 // Paystack keys from environment variables
 const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY;
@@ -21,9 +22,7 @@ export const initializePayment = async (req: Request, res: Response): Promise<vo
     console.log(`📍 Initializing payment - student: ${student_id}, email: ${email}, amount: ${amount} pesewas`);
 
     // Initialize payment with Paystack
-    const baseUrl = process.env.BASE_URL || (process.env.NODE_ENV === 'production'
-      ? 'https://unyva.up.railway.app'
-      : 'http://localhost:5000');
+    const baseUrl: string = process.env.BASE_URL || '';
 
     const response = await axios.post('https://api.paystack.co/transaction/initialize', {
       email,
@@ -50,7 +49,11 @@ export const initializePayment = async (req: Request, res: Response): Promise<vo
     });
   } catch (error) {
     console.error(`❌ Payment initialization error for student ${req.body.student_id}:`, error);
-    res.status(500).json({ error: 'Failed to initialize payment' });
+    handleControllerError(res, error, {
+      statusCode: 500,
+      publicError: 'Failed to initialize payment',
+      context: 'payment/initializePayment',
+    });
   }
 };
 
@@ -185,7 +188,11 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
     }
   } catch (error) {
     console.error(`❌ Payment verification error - student: ${req.body.student_id}, ref: ${req.body.reference}:`, error);
-    res.status(500).json({ error: 'Internal server error' });
+    handleControllerError(res, error, {
+      statusCode: 500,
+      publicError: 'Internal server error',
+      context: 'payment/verifyPayment',
+    });
   }
 };
 
@@ -246,7 +253,11 @@ export const getPaymentStatus = async (req: Request, res: Response): Promise<voi
     });
   } catch (error) {
     console.error(`❌ Get payment status error - student: ${req.params.studentId}:`, error);
-    res.status(500).json({ error: 'Internal server error' });
+    handleControllerError(res, error, {
+      statusCode: 500,
+      publicError: 'Internal server error',
+      context: 'payment/getPaymentStatus',
+    });
   }
 };
 
@@ -368,6 +379,10 @@ export const handleWebhook = async (req: Request, res: Response): Promise<void> 
     res.status(200).json({ status: 'success' });
   } catch (error) {
     console.error('Webhook handling error:', error);
-    res.status(500).json({ error: 'Webhook processing failed' });
+    handleControllerError(res, error, {
+      statusCode: 500,
+      publicError: 'Webhook processing failed',
+      context: 'payment/handleWebhook',
+    });
   }
 };

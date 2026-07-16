@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import { confirmGuideSession, endFreshmanSession, getSession, getSessionByBooking, startFreshmanSession } from '../../services/companion/sessionService.js';
 import { completeBooking } from '../../services/companion/bookingService.js';
+import { handleControllerError } from '../../utils/apiError.js';
+
 export async function startSessionController(req: Request, res: Response) {
   try {
     const student_id = (req as any).student?.student_id;
@@ -9,7 +11,11 @@ export async function startSessionController(req: Request, res: Response) {
     const { session, pin } = await startFreshmanSession({ bookingId: req.params.bookingId, freshman_id: student_id });
     return res.json({ session, pin });
   } catch (e: any) {
-    return res.status(400).json({ error: e.message ?? 'Failed to start session' });
+    return handleControllerError(res, e, {
+      statusCode: 400,
+      publicError: 'Failed to start session',
+      context: 'companion/startSession',
+    });
   }
 }
 
@@ -26,7 +32,11 @@ export async function confirmSessionController(req: Request, res: Response) {
 
     return res.json({ session });
   } catch (e: any) {
-    return res.status(400).json({ error: e.message ?? 'Failed to confirm session' });
+    return handleControllerError(res, e, {
+      statusCode: 400,
+      publicError: 'Failed to confirm session',
+      context: 'companion/confirmSession',
+    });
   }
 }
 
@@ -46,7 +56,11 @@ export async function endSessionController(req: Request, res: Response) {
 
     return res.json({ session });
   } catch (e: any) {
-    return res.status(400).json({ error: e.message ?? 'Failed to end session' });
+    return handleControllerError(res, e, {
+      statusCode: 400,
+      publicError: 'Failed to end session',
+      context: 'companion/endSession',
+    });
   }
 }
 
@@ -55,7 +69,11 @@ export async function getSessionController(req: Request, res: Response) {
     const session = await getSession(req.params.id);
     return res.json({ session });
   } catch (e: any) {
-    return res.status(400).json({ error: e.message ?? 'Failed to get session' });
+    return handleControllerError(res, e, {
+      statusCode: 400,
+      publicError: 'Failed to get session',
+      context: 'companion/getSession',
+    });
   }
 }
 
@@ -64,7 +82,10 @@ export async function getSessionByBookingController(req: Request, res: Response)
     const session = await getSessionByBooking(req.params.bookingId);
     return res.json({ session });
   } catch (e: any) {
-    return res.status(400).json({ error: e.message ?? 'Failed to get session by booking' });
+    return handleControllerError(res, e, {
+      statusCode: 400,
+      publicError: 'Failed to get session by booking',
+      context: 'companion/getSessionByBooking',
+    });
   }
 }
-

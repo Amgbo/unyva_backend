@@ -1,319 +1,139 @@
-// src/controllers/reviewController.ts
 import { Request, Response } from 'express';
-import { AuthRequest } from '../middleware/authMiddleware.js';
 import { pool } from '../db.js';
-import { ReviewModel, ProductReview, CreateReviewData } from '../models/reviewModel.js';
+import { handleControllerError } from '../utils/apiError.js';
 
-// GET: Get all reviews for a product (with nested replies)
-export const getProductReviews = async (req: Request<{ productId?: string; id?: string }>, res: Response): Promise<void> => {
-  try {
-    const productId = req.params.productId || req.params.id;
-    const productIdNum = parseInt(productId!, 10);
-
-    if (isNaN(productIdNum)) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid product ID'
-      });
-      return;
-    }
-
-    // Extract pagination parameters from query
-    const page = parseInt(req.query.page as string, 10) || 1;
-    const limit = parseInt(req.query.limit as string, 10) || 10;
-
-    const result = await ReviewModel.getProductReviews(productIdNum, page, limit);
-
-    res.status(200).json({
-      success: true,
-      reviews: result.reviews,
-      total: result.total,
-      hasMore: result.hasMore
-    });
-  } catch (error) {
-    console.error('❌ Error fetching product reviews:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch product reviews',
-      message: error instanceof Error ? error.message : 'Unknown error'
-    });
-  }
-};
-
-// POST: Create a new review or reply
-export const createReview = async (req: AuthRequest, res: Response): Promise<void> => {
+// POST /api/reviews - Create a review
+export const createReview = async (req: any, res: Response): Promise<void> => {
   try {
     const studentId = req.user?.student_id;
-    const { product_id, rating, comment, parent_id } = req.body;
+    const { product_id, seller_id, rating, comment } = req.body;
 
     if (!studentId) {
-      res.status(401).json({
-        success: false,
-        error: 'Authentication required'
-      });
+      res.status(401).json({ error: 'Authentication required' });
       return;
     }
 
-    // Validate required fields
-    if (!product_id || !comment) {
-      res.status(400).json({
-        success: false,
-        error: 'Product ID and comment are required'
-      });
+    if (!product_id || !seller_id || !rating) {
+      res.status(400).json({ error: 'Product ID, seller ID, and rating are required' });
       return;
     }
 
-    // Rating is required only for top-level reviews (not replies)
-    if (!parent_id && (rating === undefined || rating === null)) {
-      res.status(400).json({
-        success: false,
-        error: 'Rating is required for reviews'
-      });
+    if (rating < 1 || rating > 5) {
+      res.status(400).json({ error: 'Rating must be between 1 and 5' });
       return;
     }
 
-    // Check permissions based on whether this is a review or reply
-    if (!parent_id) {
-      // Top-level review: check if user can review this product
-      const canReview = await ReviewModel.canUserReviewProduct(studentId, product_id);
-      if (!canReview) {
-        res.status(403).json({
-          success: false,
-          error: 'You are not authorized to review this product'
-        });
-        return;
-      }
-    } else {
-      // Reply: check if user can reply to this comment (all authenticated users can reply)
-      const canReply = await ReviewModel.canReplyToComment(parent_id);
-      if (!canReply) {
-        res.status(403).json({
-          success: false,
-          error: 'You cannot reply to this comment'
-        });
-        return;
-      }
+    // Check if user has purchased from this seller
+    const orderResult = await pool.query(
+      `SELECT o.id FROM orders o
+       JOIN order_items oi ON o.id = oi.order_id
+       WHERE o.student_id = $1 AND oi.seller_id = $2 AND o.status IN ('completed', 'delivered')
+       LIMIT 1`,
+      [studentId, seller_id]
+    );
+
+    if (orderResult.rows.length === 0) {
+      res.status(403).json({ error: 'You can only review sellers you have purchased from' });
+      return;
     }
 
-    // If this is a reply, check if parent review exists and belongs to the same product
-    if (parent_id) {
-      const client = await pool.connect();
-      try {
-        const parentQuery = `
-          SELECT id, product_id, depth FROM product_reviews
-          WHERE id = $1
-        `;
-        const parentResult = await client.query(parentQuery, [parent_id]);
+    // Check if already reviewed
+    const existingReview = await pool.query(
+      'SELECT id FROM reviews WHERE reviewer_id = $1 AND seller_id = $2',
+      [studentId, seller_id]
+    );
 
-        if (parentResult.rows.length === 0) {
-          res.status(404).json({
-            success: false,
-            error: 'Parent review not found'
-          });
-          return;
-        }
-
-        if (parentResult.rows[0].product_id !== product_id) {
-          res.status(400).json({
-            success: false,
-            error: 'Parent review does not belong to this product'
-          });
-          return;
-        }
-
-        // Check max depth (3 levels: depth 0, 1, 2)
-        const parentDepth = parentResult.rows[0].depth || 0;
-        if (parentDepth >= 2) {
-          res.status(400).json({
-            success: false,
-            error: 'Cannot nest comments more than 3 levels deep. This comment is already at maximum nesting level.'
-          });
-          return;
-        }
-      } finally {
-        client.release();
-      }
+    if (existingReview.rows.length > 0) {
+      res.status(409).json({ error: 'You have already reviewed this seller' });
+      return;
     }
 
-    const reviewData: CreateReviewData = {
-      product_id,
-      student_id: studentId,
-      rating: parent_id ? 0 : rating,
-      comment,
-      title: parent_id ? 'Reply' : 'Review',
-      parent_id: parent_id || null
-    };
-
-    const review = await ReviewModel.createReview(reviewData);
-
-    // Update product rating after creating review
-    await ReviewModel.updateProductRating(product_id);
+    const result = await pool.query(
+      `INSERT INTO reviews (reviewer_id, seller_id, product_id, rating, comment)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING *`,
+      [studentId, seller_id, product_id, rating, comment || null]
+    );
 
     res.status(201).json({
       success: true,
-      message: parent_id ? 'Reply added successfully' : 'Review added successfully',
-      review
+      review: result.rows[0]
     });
-  } catch (error) {
-    console.error('❌ Error creating review:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to create review',
-      message: error instanceof Error ? error.message : 'Unknown error'
-    });
-  }
-};
-
-// PUT: Update a review or reply
-export const updateReview = async (req: AuthRequest, res: Response): Promise<void> => {
-  res.status(501).json({
-    success: false,
-    error: 'Update functionality not yet implemented'
-  });
-};
-
-// DELETE: Delete a review and its replies
-export const deleteReview = async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const studentId = req.user?.student_id;
-    const { id: reviewId } = req.params;
-    const reviewIdNum = parseInt(reviewId, 10);
-
-    if (!studentId) {
-      res.status(401).json({
-        success: false,
-        error: 'Authentication required'
-      });
-      return;
-    }
-
-    if (isNaN(reviewIdNum)) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid review ID'
-      });
-      return;
-    }
-
-    // Check if the review exists and belongs to the authenticated user
-    const client = await pool.connect();
-    try {
-      const ownershipQuery = `
-        SELECT id, student_id FROM product_reviews
-        WHERE id = $1
-      `;
-      const ownershipResult = await client.query(ownershipQuery, [reviewIdNum]);
-
-      if (ownershipResult.rows.length === 0) {
-        res.status(404).json({
-          success: false,
-          error: 'Review not found'
-        });
-        return;
-      }
-
-      if (ownershipResult.rows[0].student_id !== studentId) {
-        res.status(403).json({
-          success: false,
-          error: 'You can only delete your own reviews'
-        });
-        return;
-      }
-
-      // Delete the review
-      await ReviewModel.deleteReview(reviewIdNum);
-
-      res.status(200).json({
-        success: true,
-        message: 'Review deleted successfully'
-      });
-    } finally {
-      client.release();
-    }
-  } catch (error) {
-    console.error('❌ Error deleting review:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to delete review',
-      message: error instanceof Error ? error.message : 'Unknown error'
+  } catch (err: any) {
+    console.error('❌ Create Review Error:', err);
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to create review',
+      context: 'review/createReview',
     });
   }
 };
 
-// GET: Check if user can review a product
-export const canUserReviewProduct = async (req: AuthRequest, res: Response): Promise<void> => {
+// GET /api/reviews/seller/:sellerId - Get reviews for a seller
+export const getSellerReviews = async (req: Request, res: Response): Promise<void> => {
   try {
-    const studentId = req.user?.student_id;
-    const { id } = req.params;
-    const productId = parseInt(id, 10);
+    const { sellerId } = req.params;
 
-    if (!studentId) {
-      res.status(401).json({
-        success: false,
-        error: 'Authentication required'
-      });
-      return;
-    }
+    const result = await pool.query(
+      `SELECT r.*, s.first_name as reviewer_first_name, s.last_name as reviewer_last_name
+       FROM reviews r
+       JOIN students s ON r.reviewer_id = s.student_id
+       WHERE r.seller_id = $1
+       ORDER BY r.created_at DESC`,
+      [sellerId]
+    );
 
-    if (isNaN(productId)) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid product ID'
-      });
-      return;
-    }
-
-    const canReview = await ReviewModel.canUserReviewProduct(studentId, productId);
+    // Calculate average rating
+    const avgResult = await pool.query(
+      'SELECT AVG(rating) as average_rating, COUNT(*) as total_reviews FROM reviews WHERE seller_id = $1',
+      [sellerId]
+    );
 
     res.status(200).json({
       success: true,
-      canReview
+      reviews: result.rows,
+      average_rating: parseFloat(avgResult.rows[0].average_rating) || 0,
+      total_reviews: parseInt(avgResult.rows[0].total_reviews)
     });
-  } catch (error) {
-    console.error('❌ Error checking review permission:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to check review permission',
-      message: error instanceof Error ? error.message : 'Unknown error'
+  } catch (err: any) {
+    console.error('❌ Get Seller Reviews Error:', err);
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to fetch seller reviews',
+      context: 'review/getSellerReviews',
     });
   }
 };
 
-// GET: Get user's review for a product
-export const getUserReviewForProduct = async (req: AuthRequest, res: Response): Promise<void> => {
+// GET /api/reviews/my - Get reviews written by current user
+export const getMyReviews = async (req: any, res: Response): Promise<void> => {
   try {
     const studentId = req.user?.student_id;
-    const { id } = req.params;
-    const productId = parseInt(id, 10);
 
     if (!studentId) {
-      res.status(401).json({
-        success: false,
-        error: 'Authentication required'
-      });
+      res.status(401).json({ error: 'Authentication required' });
       return;
     }
 
-    if (isNaN(productId)) {
-      res.status(400).json({
-        success: false,
-        error: 'Invalid product ID'
-      });
-      return;
-    }
-
-    const review = await ReviewModel.getUserReviewForProduct(studentId, productId);
+    const result = await pool.query(
+      `SELECT r.*, s.first_name as seller_first_name, s.last_name as seller_last_name
+       FROM reviews r
+       JOIN students s ON r.seller_id = s.student_id
+       WHERE r.reviewer_id = $1
+       ORDER BY r.created_at DESC`,
+      [studentId]
+    );
 
     res.status(200).json({
       success: true,
-      review
+      reviews: result.rows
     });
-  } catch (error) {
-    console.error('❌ Error fetching user review:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch user review',
-      message: error instanceof Error ? error.message : 'Unknown error'
+  } catch (err: any) {
+    console.error('❌ Get My Reviews Error:', err);
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to fetch your reviews',
+      context: 'review/getMyReviews',
     });
   }
 };

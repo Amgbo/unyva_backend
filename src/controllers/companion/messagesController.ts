@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { countUnreadMessages, getBookingMessages, markMessagesRead, sendCompanionMessage } from '../../services/companion/companionMessageService.js';
 import { notificationService } from '../../services/notificationService.js';
+import { handleControllerError } from '../../utils/apiError.js';
 
 function buildDirectThreadId(a: string, b: string): string {
   const [x, y] = [String(a), String(b)].sort();
@@ -48,7 +49,11 @@ export async function sendMessageController(req: Request, res: Response) {
 
     return res.status(201).json({ message, thread_id: threadId });
   } catch (e: any) {
-    return res.status(400).json({ error: e.message ?? 'Failed to send message' });
+    return handleControllerError(res, e, {
+      statusCode: 400,
+      publicError: 'Failed to send message',
+      context: 'companion/sendMessage',
+    });
   }
 }
 
@@ -58,7 +63,11 @@ export async function getMessagesController(req: Request, res: Response) {
     const messages = await getBookingMessages(bookingId);
     return res.json({ messages });
   } catch (e: any) {
-    return res.status(400).json({ error: e.message ?? 'Failed to get messages' });
+    return handleControllerError(res, e, {
+      statusCode: 400,
+      publicError: 'Failed to get messages',
+      context: 'companion/getMessages',
+    });
   }
 }
 
@@ -73,7 +82,10 @@ export async function markMessagesReadController(req: Request, res: Response) {
     const unreadCount = await countUnreadMessages({ booking_id: bookingId, receiver_id });
     return res.json({ success: true, unread_count: unreadCount });
   } catch (e: any) {
-    return res.status(400).json({ error: e.message ?? 'Failed to mark messages as read' });
+    return handleControllerError(res, e, {
+      statusCode: 400,
+      publicError: 'Failed to mark messages as read',
+      context: 'companion/markMessagesRead',
+    });
   }
 }
-

@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { getGuideReviews, submitGuideReview } from '../../services/companion/reviewService.js';
 import { getGuideById } from '../../models/companion/guideModel.js';
 import { notificationService } from '../../services/notificationService.js';
+import { handleControllerError } from '../../utils/apiError.js';
 
 function formatStudentName(student: any): string {
   const full = [student?.first_name, student?.last_name].filter(Boolean).join(' ').trim();
@@ -38,7 +39,11 @@ export async function submitReviewController(req: Request, res: Response) {
 
     return res.status(201).json({ review });
   } catch (e: any) {
-    return res.status(400).json({ error: e.message ?? 'Failed to submit review' });
+    return handleControllerError(res, e, {
+      statusCode: 400,
+      publicError: 'Failed to submit review',
+      context: 'companion/submitReview',
+    });
   }
 }
 
@@ -50,7 +55,11 @@ export async function getMyReviewsController(req: Request, res: Response) {
     const reviews = await getGuideReviews(student_id);
     return res.json({ reviews });
   } catch (e: any) {
-    return res.status(400).json({ error: e.message ?? 'Failed to fetch reviews' });
+    return handleControllerError(res, e, {
+      statusCode: 400,
+      publicError: 'Failed to fetch reviews',
+      context: 'companion/getMyReviews',
+    });
   }
 }
 
@@ -59,7 +68,10 @@ export async function getGuideReviewsController(req: Request, res: Response) {
     const reviews = await getGuideReviews(req.params.guideId);
     return res.json({ reviews });
   } catch (e: any) {
-    return res.status(400).json({ error: e.message ?? 'Failed to fetch guide reviews' });
+    return handleControllerError(res, e, {
+      statusCode: 400,
+      publicError: 'Failed to fetch guide reviews',
+      context: 'companion/getGuideReviews',
+    });
   }
 }
-

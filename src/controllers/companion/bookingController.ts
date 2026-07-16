@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { acceptBooking, cancelBooking, createNewBooking, declineBooking, getBookingDetails, getBookingsForGuide, getMyBookings } from '../../services/companion/bookingService.js';
 import { getGuideById } from '../../models/companion/guideModel.js';
 import { notificationService } from '../../services/notificationService.js';
+import { handleControllerError } from '../../utils/apiError.js';
 
 function formatStudentName(student: any): string {
   const full = [student?.first_name, student?.last_name].filter(Boolean).join(' ').trim();
@@ -39,7 +40,11 @@ export async function createBookingController(req: Request, res: Response) {
 
     return res.status(201).json({ booking });
   } catch (e: any) {
-    return res.status(400).json({ error: e.message ?? 'Failed to create booking' });
+    return handleControllerError(res, e, {
+      statusCode: 400,
+      publicError: 'Failed to create booking',
+      context: 'companion/createBooking',
+    });
   }
 }
 
@@ -51,7 +56,11 @@ export async function listMyBookingsAsFreshmanController(req: Request, res: Resp
     const bookings = await getMyBookings(student_id);
     return res.json({ bookings });
   } catch (e: any) {
-    return res.status(400).json({ error: e.message ?? 'Failed to list bookings' });
+    return handleControllerError(res, e, {
+      statusCode: 400,
+      publicError: 'Failed to list bookings',
+      context: 'companion/listMyBookingsAsFreshman',
+    });
   }
 }
 
@@ -63,7 +72,11 @@ export async function listMyBookingsController(req: Request, res: Response) {
     const bookings = await getMyBookings(student_id);
     return res.json({ bookings });
   } catch (e: any) {
-    return res.status(400).json({ error: e.message ?? 'Failed to list bookings' });
+    return handleControllerError(res, e, {
+      statusCode: 400,
+      publicError: 'Failed to list bookings',
+      context: 'companion/listMyBookings',
+    });
   }
 }
 
@@ -75,7 +88,11 @@ export async function listBookingsForGuideController(req: Request, res: Response
     const bookings = await getBookingsForGuide(guideId);
     return res.json({ bookings });
   } catch (e: any) {
-    return res.status(400).json({ error: e.message ?? 'Failed to list guide bookings' });
+    return handleControllerError(res, e, {
+      statusCode: 400,
+      publicError: 'Failed to list guide bookings',
+      context: 'companion/listBookingsForGuide',
+    });
   }
 }
 
@@ -84,7 +101,11 @@ export async function getBookingDetailController(req: Request, res: Response) {
     const booking = await getBookingDetails(req.params.id);
     return res.json({ booking });
   } catch (e: any) {
-    return res.status(400).json({ error: e.message ?? 'Failed to get booking' });
+    return handleControllerError(res, e, {
+      statusCode: 400,
+      publicError: 'Failed to get booking',
+      context: 'companion/getBookingDetail',
+    });
   }
 }
 
@@ -110,7 +131,11 @@ export async function acceptBookingController(req: Request, res: Response) {
 
     return res.json({ booking });
   } catch (e: any) {
-    return res.status(400).json({ error: e.message ?? 'Failed to accept booking' });
+    return handleControllerError(res, e, {
+      statusCode: 400,
+      publicError: 'Failed to accept booking',
+      context: 'companion/acceptBooking',
+    });
   }
 }
 
@@ -136,7 +161,11 @@ export async function declineBookingController(req: Request, res: Response) {
 
     return res.json({ booking });
   } catch (e: any) {
-    return res.status(400).json({ error: e.message ?? 'Failed to decline booking' });
+    return handleControllerError(res, e, {
+      statusCode: 400,
+      publicError: 'Failed to decline booking',
+      context: 'companion/declineBooking',
+    });
   }
 }
 
@@ -165,7 +194,10 @@ export async function cancelBookingController(req: Request, res: Response) {
 
     return res.json({ booking });
   } catch (e: any) {
-    return res.status(400).json({ error: e.message ?? 'Failed to cancel booking' });
+    return handleControllerError(res, e, {
+      statusCode: 400,
+      publicError: 'Failed to cancel booking',
+      context: 'companion/cancelBooking',
+    });
   }
 }
-

@@ -1,273 +1,177 @@
-// src/controllers/imageController.ts
 import { Request, Response } from 'express';
 import imagekit, { shouldUseImageKit } from '../config/imagekit.js';
-import path from 'path';
 import { getLocalUrl, deleteLocalFile } from '../config/multer.js';
-import fs from 'fs';
+import { handleControllerError } from '../utils/apiError.js';
 
-// Configure upload limits and validation
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
-const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/heic'];
-const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.heic'];
+const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
-// Helper function to validate image file
-const validateImageFile = (file: Express.Multer.File): { isValid: boolean; error?: string } => {
-  // Check file size
-  if (file.size > MAX_FILE_SIZE) {
-    return { isValid: false, error: 'File size too large. Maximum size is 5MB.' };
-  }
-
-  // Check file type
-  if (!ALLOWED_IMAGE_TYPES.includes(file.mimetype)) {
-    return { isValid: false, error: 'Invalid file type. Only JPEG, PNG, and WebP images are allowed.' };
-  }
-
-  // Check file extension
-  const fileExt = path.extname(file.originalname).toLowerCase();
-  if (!ALLOWED_EXTENSIONS.includes(fileExt)) {
-    return { isValid: false, error: 'Invalid file extension. Only .jpg, .jpeg, .png, .webp are allowed.' };
-  }
-
-  return { isValid: true };
-};
-
-// Upload single image
-export const uploadProductImage = async (req: Request, res: Response): Promise<void> => {
+// POST /api/images/upload - Upload an image
+export const uploadImage = async (req: any, res: Response): Promise<void> => {
   try {
+    console.log('📸 Image upload request received');
+
     if (!req.file) {
       res.status(400).json({
-        success: false,
         error: 'No image file provided'
       });
       return;
     }
 
-    const validation = validateImageFile(req.file);
-    if (!validation.isValid) {
+    // Validate file size
+    if (req.file.size > MAX_FILE_SIZE) {
       res.status(400).json({
-        success: false,
-        error: validation.error
+        error: 'File size too large. Maximum size is 5MB.'
       });
       return;
     }
 
-    // Conditional upload: ImageKit or local disk
+    // Validate file type
+    if (!ALLOWED_MIME_TYPES.includes(req.file.mimetype)) {
+      res.status(400).json({
+        error: 'Invalid file type. Only JPEG, PNG, WebP, and GIF are allowed.'
+      });
+      return;
+    }
+
     let imageUrl: string;
+
     if (shouldUseImageKit() && imagekit) {
+      // Upload to ImageKit
       const result = await imagekit.upload({
         file: req.file.buffer,
         fileName: `${Date.now()}-${req.file.originalname}`,
         folder: "/unyva_uploads",
       });
       imageUrl = result.url;
+      console.log('✅ Image uploaded to ImageKit:', imageUrl);
     } else {
-      // Local storage: multer.diskStorage should have saved file to uploads/products
-      // req.file.filename should be set by multer
+      // Saved locally by multer
       const filename = (req.file.filename as string) || req.file.originalname;
       imageUrl = getLocalUrl('products', filename);
+      console.log('✅ Image saved locally:', imageUrl);
     }
 
     res.status(201).json({
       success: true,
       message: 'Image uploaded successfully',
-      data: {
-        filename: req.file.filename,
-        originalName: req.file.originalname,
-        size: req.file.size,
-        mimetype: req.file.mimetype,
-        url: imageUrl
-      }
+      image_url: imageUrl
     });
-  } catch (error) {
-    console.error('❌ Error uploading image:', error);
-
-    res.status(500).json({
-      success: false,
-      error: 'Failed to upload image',
-      message: error instanceof Error ? error.message : 'Unknown error'
+  } catch (err: any) {
+    console.error('❌ Upload Image Error:', err);
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to upload image',
+      context: 'image/uploadImage',
     });
   }
 };
 
-// Upload multiple images (up to 5)
-export const uploadMultipleProductImages = async (req: Request, res: Response): Promise<void> => {
+// POST /api/images/upload-multiple - Upload multiple images
+export const uploadMultipleImages = async (req: any, res: Response): Promise<void> => {
   try {
-    if (!req.files || !Array.isArray(req.files)) {
+    console.log('📸 Multiple image upload request received');
+
+    if (!req.files || req.files.length === 0) {
       res.status(400).json({
-        success: false,
         error: 'No image files provided'
       });
       return;
     }
 
-    const files = req.files as Express.Multer.File[];
-    const MAX_IMAGES = 5;
-
-    if (files.length > MAX_IMAGES) {
+    if (req.files.length > 5) {
       res.status(400).json({
-        success: false,
-        error: `Too many images. Maximum ${MAX_IMAGES} images allowed.`
+        error: 'Maximum 5 images allowed per upload'
       });
       return;
     }
 
-    const uploadedImages: Array<{
-      filename: string;
-      originalName: string;
-      size: number;
-      mimetype: string;
-      url: string;
-    }> = [];
+    const imageUrls: string[] = [];
 
-    const errors: string[] = [];
-
-    // Validate and process each file
-    for (const file of files) {
-      const validation = validateImageFile(file);
-
-      if (!validation.isValid) {
-        errors.push(`${file.originalname}: ${validation.error}`);
-        continue;
+    for (const file of req.files) {
+      // Validate file size
+      if (file.size > MAX_FILE_SIZE) {
+        res.status(400).json({
+          error: `File ${file.originalname} is too large. Maximum size is 5MB.`
+        });
+        return;
       }
 
-      let imageUrl: string;
+      // Validate file type
+      if (!ALLOWED_MIME_TYPES.includes(file.mimetype)) {
+        res.status(400).json({
+          error: `Invalid file type for ${file.originalname}. Only JPEG, PNG, WebP, and GIF are allowed.`
+        });
+        return;
+      }
+
       if (shouldUseImageKit() && imagekit) {
         const result = await imagekit.upload({
           file: file.buffer,
           fileName: `${Date.now()}-${file.originalname}`,
           folder: "/unyva_uploads",
         });
-        imageUrl = result.url;
+        imageUrls.push(result.url);
       } else {
         const filename = (file.filename as string) || file.originalname;
-        imageUrl = getLocalUrl('products', filename);
+        imageUrls.push(getLocalUrl('products', filename));
       }
-      uploadedImages.push({
-        filename: file.filename,
-        originalName: file.originalname,
-        size: file.size,
-        mimetype: file.mimetype,
-        url: imageUrl
-      });
     }
 
-    if (errors.length > 0) {
-      res.status(400).json({
-        success: false,
-        error: 'Some images failed validation',
-        details: errors,
-        uploadedImages: uploadedImages.length > 0 ? uploadedImages : undefined
-      });
-      return;
-    }
+    console.log('✅ Multiple images uploaded successfully:', imageUrls.length, 'images');
 
     res.status(201).json({
       success: true,
-      message: `${uploadedImages.length} image(s) uploaded successfully`,
-      data: {
-        count: uploadedImages.length,
-        images: uploadedImages
-      }
+      message: `${imageUrls.length} images uploaded successfully`,
+      image_urls: imageUrls
     });
-  } catch (error) {
-    console.error('❌ Error uploading multiple images:', error);
-
-    res.status(500).json({
-      success: false,
-      error: 'Failed to upload images',
-      message: error instanceof Error ? error.message : 'Unknown error'
+  } catch (err: any) {
+    console.error('❌ Upload Multiple Images Error:', err);
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to upload images',
+      context: 'image/uploadMultipleImages',
     });
   }
 };
 
-// Delete uploaded image
-export const deleteProductImage = async (req: Request, res: Response): Promise<void> => {
+// DELETE /api/images/:filename - Delete an image (Admin only)
+export const deleteImage = async (req: any, res: Response): Promise<void> => {
   try {
     const { filename } = req.params;
+    const studentId = req.user?.student_id;
 
-    if (!filename) {
-      res.status(400).json({
-        success: false,
-        error: 'Filename is required'
+    console.log('🗑️ Deleting image:', filename);
+
+    // Check if user is admin (student_id '22243185')
+    if (studentId !== '22243185') {
+      console.log('❌ Access denied: Non-admin user attempted to delete image');
+      res.status(403).json({
+        error: 'Access denied. Admin privileges required.'
       });
       return;
     }
 
     if (shouldUseImageKit() && imagekit) {
-      // Delete from ImageKit using fileId (assuming filename is fileId)
+      // For ImageKit, we need the fileId. The filename alone isn't enough.
+      // This is a simplified implementation.
       await imagekit.deleteFile(filename);
+      console.log('🗑️ Deleted image from ImageKit:', filename);
     } else {
-      // Delete from local storage (products folder)
       await deleteLocalFile('products', filename);
+      console.log('🗑️ Deleted local image:', filename);
     }
 
     res.status(200).json({
       success: true,
       message: 'Image deleted successfully'
     });
-  } catch (error) {
-    console.error('❌ Error deleting image:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to delete image',
-      message: error instanceof Error ? error.message : 'Unknown error'
-    });
-  }
-};
-
-// Get image info
-export const getImageInfo = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { filename } = req.params;
-
-    if (!filename) {
-      res.status(400).json({
-        success: false,
-        error: 'Filename is required'
-      });
-      return;
-    }
-
-    if (shouldUseImageKit() && imagekit) {
-      const result = await imagekit.getFileDetails(filename);
-      res.status(200).json({
-        success: true,
-        data: {
-          filename,
-          url: result.url,
-          size: result.size,
-          createdAt: new Date(result.createdAt),
-          modifiedAt: new Date(result.createdAt),
-          width: result.width,
-          height: result.height,
-          format: result.fileType
-        }
-      });
-    } else {
-      // Local file info
-      const filePath = path.join(process.cwd(), 'uploads', 'products', filename);
-      if (!fs.existsSync(filePath)) {
-        res.status(404).json({ success: false, error: 'File not found' });
-        return;
-      }
-      const stats = await fs.promises.stat(filePath);
-      res.status(200).json({
-        success: true,
-        data: {
-          filename,
-          url: getLocalUrl('products', filename),
-          size: stats.size,
-          createdAt: stats.birthtime,
-          modifiedAt: stats.mtime,
-        }
-      });
-    }
-  } catch (error) {
-    console.error('❌ Error getting image info:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to get image information',
-      message: error instanceof Error ? error.message : 'Unknown error'
+  } catch (err: any) {
+    console.error('❌ Delete Image Error:', err);
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to delete image',
+      context: 'image/deleteImage',
     });
   }
 };

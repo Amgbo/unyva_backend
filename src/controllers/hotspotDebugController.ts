@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { pool } from '../db.js';
+import { handleControllerError } from '../utils/apiError.js';
 
 const toFiniteNumber = (v: any): number | null => {
   if (v === undefined || v === null) return null;
@@ -122,7 +123,11 @@ export const debugNearby = async (req: Request, res: Response): Promise<void> =>
       nearest_coverage_by_distance: nearestRes.rows,
     });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: 'debugNearby failed', message: err?.message ?? String(err) });
+    console.error('❌ debugNearby Error:', err);
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'debugNearby failed',
+      context: 'hotspot/debugNearby',
+    });
   }
 };
-

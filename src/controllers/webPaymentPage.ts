@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import axios from 'axios';
+import { handleControllerError } from '../utils/apiError.js';
 
 const router = express.Router();
 
@@ -58,7 +59,11 @@ router.post('/verify-payment', async (req: Request, res: Response, next: NextFun
     }
   } catch (error) {
     console.error('Payment verification error:', error);
-    next(error);
+    handleControllerError(res, error, {
+      statusCode: 500,
+      publicError: 'Payment verification failed',
+      context: 'webPayment/verifyPayment',
+    });
   }
 });
 

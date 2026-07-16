@@ -1,8 +1,9 @@
 // universityHallController.ts
 import { Request, Response } from 'express';
 import { getAllHalls } from '../models/universityHallModel.js';
+import { handleControllerError } from '../utils/apiError.js';
 
-export const getHalls = async (req: Request, res: Response): Promise<void> => {
+export const getHalls = async (_req: Request, res: Response): Promise<void> => {
   try {
     console.log('Received request to fetch halls');
     const halls = await getAllHalls();
@@ -12,23 +13,10 @@ export const getHalls = async (req: Request, res: Response): Promise<void> => {
     res.json(halls);
   } catch (error: any) {
     console.error('Error fetching halls:', error);
-
-    // More specific error messages
-    if (error.code === '42P01') { // Table doesn't exist
-      res.status(500).json({
-        error: 'Database table not found',
-        details: 'The university_halls table does not exist in the database'
-      });
-    } else if (error.code === 'ECONNREFUSED') {
-      res.status(500).json({
-        error: 'Database connection failed',
-        details: 'Unable to connect to the database server'
-      });
-    } else {
-      res.status(500).json({
-        error: 'Failed to fetch halls',
-        details: error.message
-      });
-    }
+    handleControllerError(res, error, {
+      statusCode: 500,
+      publicError: 'Failed to fetch halls',
+      context: 'universityHall/getHalls',
+    });
   }
 };

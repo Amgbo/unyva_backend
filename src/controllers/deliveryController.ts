@@ -1,420 +1,512 @@
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import { pool } from '../db.js';
-import { AuthRequest } from '../middleware/authMiddleware.js';
+import { deliveryCodeManager } from '../utils/DeliveryCodeManager.js';
 import { notificationService } from '../services/notificationService.js';
+import { handleControllerError } from '../utils/apiError.js';
 
-/**
- * Delivery Controller - Handles delivery person operations
- */
-
-// Middleware to ensure user is a delivery person
-const requireDeliveryRole = (req: AuthRequest, res: Response, next: any): void => {
-  console.log('requireDeliveryRole called, req.user:', req.user);
-  if (req.user?.role !== 'delivery') {
-    console.log('Access denied: user role is', req.user?.role);
-    res.status(403).json({ error: 'Access denied. Delivery role required.' });
-    return;
-  }
-  console.log('Delivery role check passed');
-  // Note: Removed is_delivery_approved check for now to allow testing
-  // TODO: Add back approval check once admin approval system is implemented
-  next();
-};
-
-/**
- * Get delivery stats for the authenticated delivery person
- */
-export const getDeliveryStats = async (req: AuthRequest, res: Response): Promise<void> => {
+// GET /api/deliveries/verify-code/:code - Verify a delivery code
+export const verifyDeliveryCode = async (req: Request, res: Response): Promise<void> => {
   try {
-    const studentId = String(req.user!.student_id);
+    const { code } = req.params;
+    console.log('🔍 Verifying delivery code:', code);
 
-    // Total deliveries
-    const totalDeliveriesResult = await pool.query(
-      `SELECT COUNT(*) as total FROM deliveries WHERE delivery_person_id = $1`,
-      [studentId]
-    );
-
-    // Completed deliveries
-    const completedDeliveriesResult = await pool.query(
-      `SELECT COUNT(*) as completed FROM deliveries 
-       WHERE delivery_person_id = $1 AND status = 'completed'`,
-      [studentId]
-    );
-
-    // Pending deliveries
-    const pendingDeliveriesResult = await pool.query(
-      `SELECT COUNT(*) as pending FROM deliveries 
-       WHERE delivery_person_id = $1 AND status IN ('pending', 'assigned', 'in_progress')`,
-      [studentId]
-    );
-
-    // Average rating
-    const avgRatingResult = await pool.query(
-      `SELECT AVG(rating) as average_rating FROM deliveries 
-       WHERE delivery_person_id = $1 AND rating IS NOT NULL`,
-      [studentId]
-    );
-
-    // Total earnings (sum of delivery fees for completed deliveries)
-    const totalEarningsResult = await pool.query(
-      `SELECT COALESCE(SUM(delivery_fee), 0) as total_earnings FROM deliveries 
-       WHERE delivery_person_id = $1 AND status = 'completed'`,
-      [studentId]
-    );
-
-    const stats = {
-      total_deliveries: parseInt(totalDeliveriesResult.rows[0].total),
-      completed_deliveries: parseInt(completedDeliveriesResult.rows[0].completed),
-      pending_deliveries: parseInt(pendingDeliveriesResult.rows[0].pending),
-      average_rating: parseFloat(avgRatingResult.rows[0].average_rating) || 0,
-      total_earnings: parseFloat(totalEarningsResult.rows[0].total_earnings),
-    };
-
-    res.json({ success: true, stats });
-  } catch (error) {
-    console.error('Error fetching delivery stats:', error);
-    res.status(500).json({ error: 'Failed to fetch delivery stats' });
-  }
-};
-
-/**
- * Get list of deliveries for the delivery person
- */
-export const getDeliveries = async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const studentId = String(req.user!.student_id);
-    const { status, page = 1, limit = 10 } = req.query;
-    const offset = (parseInt(page as string) - 1) * parseInt(limit as string);
-
-    let query = `
-      SELECT d.*, 
-             s1.first_name as customer_first_name, s1.last_name as customer_last_name,
-             s2.first_name as seller_first_name, s2.last_name as seller_last_name,
-             uh1.full_name as pickup_hall, uh2.full_name as delivery_hall
-      FROM deliveries d
-      LEFT JOIN students s1 ON d.customer_id = s1.student_id
-      LEFT JOIN students s2 ON d.seller_id = s2.student_id  -- Assuming seller_id if exists, else adjust
-      LEFT JOIN university_halls uh1 ON d.pickup_hall_id = uh1.id
-      LEFT JOIN university_halls uh2 ON d.delivery_hall_id = uh2.id
-      WHERE d.delivery_person_id = $1
-    `;
-    const params: (string | number)[] = [studentId];
-
-    if (status) {
-      query += ` AND d.status = $${params.length + 1}`;
-      params.push(status as string);
+    if (!code || code.trim().length === 0) {
+      res.status(400).json({
+        success: false,
+        error: 'Delivery code is required'
+      });
+      return;
     }
 
-    query += ` ORDER BY d.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-    params.push(parseInt(limit as string), offset);
+    const result = await deliveryCodeManager.validateCode(code.trim());
 
-    const deliveriesResult = await pool.query(query, params);
+    if (!result.isValid) {
+      res.status(400).json({
+        success: false,
+        error: result.message || 'Invalid delivery code'
+      });
+      return;
+    }
 
-    // Get total count for pagination
-    const countQuery = `
-      SELECT COUNT(*) as total FROM deliveries 
-      WHERE delivery_person_id = $1${status ? ` AND status = $${params.length}` : ''}
-    `;
-    const countParams = [studentId, ...(status ? [status] : [])];
-    const countResult = await pool.query(countQuery, countParams);
-
-    res.json({
+    console.log('✅ Delivery code verified successfully');
+    res.status(200).json({
       success: true,
-      deliveries: deliveriesResult.rows,
-      pagination: {
-        page: parseInt(page as string),
-        limit: parseInt(limit as string),
-        total: parseInt(countResult.rows[0].total),
-        pages: Math.ceil(parseInt(countResult.rows[0].total) / parseInt(limit as string)),
-      },
+      message: result.message || 'Delivery code verified successfully'
     });
-  } catch (error) {
-    console.error('Error fetching deliveries:', error);
-    res.status(500).json({ error: 'Failed to fetch deliveries' });
+  } catch (err: any) {
+    console.error('❌ Verify Delivery Code Error:', err);
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to verify delivery code',
+      context: 'delivery/verifyDeliveryCode',
+    });
   }
 };
 
-/**
- * Start a delivery (change status from assigned to in_progress)
- */
-export const acceptDelivery = async (req: AuthRequest, res: Response): Promise<void> => {
+// POST /api/deliveries/register - Register as a delivery user
+export const registerDeliveryUser = async (req: any, res: Response): Promise<void> => {
   try {
-    const studentId = String(req.user!.student_id);
-    const deliveryId = parseInt(req.params.id);
+    const studentId = req.user?.student_id;
+    const { delivery_code, vehicle_type, phone, location } = req.body;
 
-    if (isNaN(deliveryId)) {
-      res.status(400).json({ error: 'Invalid delivery ID' });
+    console.log('🚚 Registering delivery user:', studentId);
+
+    if (!studentId) {
+      res.status(401).json({
+        success: false,
+        error: 'Authentication required'
+      });
       return;
     }
 
-    // Check if delivery person has unfinished delivery
-    const unfinishedDeliveryCheck = await pool.query(
-      `SELECT COUNT(*) as count FROM deliveries
-       WHERE delivery_person_id = $1 AND status IN ('assigned', 'in_progress')`,
+    if (!delivery_code) {
+      res.status(400).json({
+        success: false,
+        error: 'Delivery code is required'
+      });
+      return;
+    }
+
+    // Verify the delivery code
+    const codeResult = await deliveryCodeManager.validateCode(delivery_code.trim());
+
+    if (!codeResult.isValid) {
+      res.status(400).json({
+        success: false,
+        error: codeResult.message || 'Invalid delivery code'
+      });
+      return;
+    }
+
+    // Check if already registered
+    const existingResult = await pool.query(
+      'SELECT id FROM delivery_users WHERE student_id = $1',
       [studentId]
     );
 
-    if (parseInt(unfinishedDeliveryCheck.rows[0].count) > 0) {
-      res.status(400).json({ error: 'You have an unfinished delivery. Complete it before accepting a new one.' });
+    if (existingResult.rows.length > 0) {
+      res.status(409).json({
+        success: false,
+        error: 'You are already registered as a delivery user'
+      });
       return;
     }
 
-    // Check if delivery person is trying to deliver their own product (only admin can do this)
-    const deliveryCheck = await pool.query(
-      `SELECT seller_id FROM deliveries WHERE id = $1`,
-      [deliveryId]
+    // Insert delivery user
+    const result = await pool.query(
+      `INSERT INTO delivery_users (student_id, vehicle_type, phone, location, is_active, rating, total_deliveries)
+       VALUES ($1, $2, $3, $4, true, 0, 0)
+       RETURNING *`,
+      [studentId, vehicle_type || null, phone || null, location || null]
     );
 
-    if (deliveryCheck.rows.length > 0) {
-      const sellerId = deliveryCheck.rows[0].seller_id;
-      if (sellerId === studentId && studentId !== '22243185') {
-        res.status(403).json({ error: 'You cannot deliver your own products.' });
-        return;
-      }
-    }
+    // Mark delivery code as used
+    await deliveryCodeManager.useCode(delivery_code.trim(), studentId);
 
-    // Attempt to assign delivery to delivery person if not already assigned
-    const assignResult = await pool.query(
-      `UPDATE deliveries
-       SET delivery_person_id = $1, status = 'assigned', assigned_at = NOW()
-       WHERE id = $2 AND (delivery_person_id IS NULL OR delivery_person_id = $1) AND status = 'pending'`,
-      [studentId, deliveryId]
-    );
-
-    if (assignResult.rowCount === 0) {
-      res.status(404).json({ error: 'Delivery not found, already assigned, or not available for acceptance' });
-      return;
-    }
-
-    // Update order status to 'assigned' when delivery is assigned
-    await pool.query(
-      `UPDATE orders
-       SET status = 'assigned', updated_at = NOW()
-       WHERE id = (SELECT order_id FROM deliveries WHERE id = $1)`,
-      [deliveryId]
-    );
-
-    // Start the delivery (change status from assigned to in_progress)
-    const startResult = await pool.query(
-      `UPDATE deliveries
-       SET status = 'in_progress', started_at = NOW()
-       WHERE id = $1 AND delivery_person_id = $2 AND status = 'assigned'`,
-      [deliveryId, studentId]
-    );
-
-    if (startResult.rowCount === 0) {
-      res.status(500).json({ error: 'Failed to start delivery after assignment' });
-      return;
-    }
-
-    // Update order status to 'in_progress' when delivery starts
-    await pool.query(
-      `UPDATE orders
-       SET status = 'in_progress', updated_at = NOW()
-       WHERE id = (SELECT order_id FROM deliveries WHERE id = $1)`,
-      [deliveryId]
-    );
-
-    res.json({ success: true, message: 'Delivery accepted and started successfully' });
-  } catch (error) {
-    console.error('Error starting delivery:', error);
-    res.status(500).json({ error: 'Failed to start delivery' });
+    console.log('✅ Delivery user registered successfully');
+    res.status(201).json({
+      success: true,
+      message: 'Delivery user registered successfully',
+      delivery_user: result.rows[0]
+    });
+  } catch (err: any) {
+    console.error('❌ Register Delivery User Error:', err);
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to register delivery user',
+      context: 'delivery/registerDeliveryUser',
+    });
   }
 };
 
-/**
- * Complete a delivery
- */
-export const completeDelivery = async (req: AuthRequest, res: Response): Promise<void> => {
-  console.log('completeDelivery called with deliveryId:', req.params.id, 'user:', req.user);
+// GET /api/deliveries/profile - Get delivery user profile
+export const getDeliveryProfile = async (req: any, res: Response): Promise<void> => {
   try {
-    const studentId = String(req.user!.student_id);
-    const deliveryId = parseInt(req.params.id, 10);
-    const { rating, review } = req.body as { rating?: number; review?: string };
-    console.log('Parsed deliveryId:', deliveryId, 'studentId:', studentId, 'rating:', rating, 'review:', review);
+    const studentId = req.user?.student_id;
 
-    if (isNaN(deliveryId)) {
-      res.status(400).json({ error: 'Invalid delivery ID' });
+    if (!studentId) {
+      res.status(401).json({
+        success: false,
+        error: 'Authentication required'
+      });
       return;
     }
 
-    // Validate rating range (1-5) if provided
-    if (rating !== undefined && (rating < 1 || rating > 5)) {
-      res.status(400).json({ error: 'Rating must be between 1 and 5' });
+    const result = await pool.query(
+      `SELECT du.*, s.first_name, s.last_name, s.email, s.phone as student_phone
+       FROM delivery_users du
+       JOIN students s ON du.student_id = s.student_id
+       WHERE du.student_id = $1`,
+      [studentId]
+    );
+
+    if (result.rows.length === 0) {
+      res.status(404).json({
+        success: false,
+        error: 'Delivery profile not found'
+      });
       return;
     }
+
+    res.status(200).json({
+      success: true,
+      profile: result.rows[0]
+    });
+  } catch (err: any) {
+    console.error('❌ Get Delivery Profile Error:', err);
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to fetch delivery profile',
+      context: 'delivery/getDeliveryProfile',
+    });
+  }
+};
+
+// PUT /api/deliveries/profile - Update delivery user profile
+export const updateDeliveryProfile = async (req: any, res: Response): Promise<void> => {
+  try {
+    const studentId = req.user?.student_id;
+    const { vehicle_type, phone, location, is_active } = req.body;
+
+    if (!studentId) {
+      res.status(401).json({
+        success: false,
+        error: 'Authentication required'
+      });
+      return;
+    }
+
+    // Check if delivery user exists
+    const existingResult = await pool.query(
+      'SELECT id FROM delivery_users WHERE student_id = $1',
+      [studentId]
+    );
+
+    if (existingResult.rows.length === 0) {
+      res.status(404).json({
+        success: false,
+        error: 'Delivery profile not found'
+      });
+      return;
+    }
+
+    // Build dynamic update query
+    const updates: string[] = [];
+    const values: any[] = [];
+    let paramIndex = 1;
+
+    if (vehicle_type !== undefined) {
+      updates.push(`vehicle_type = $${paramIndex++}`);
+      values.push(vehicle_type);
+    }
+    if (phone !== undefined) {
+      updates.push(`phone = $${paramIndex++}`);
+      values.push(phone);
+    }
+    if (location !== undefined) {
+      updates.push(`location = $${paramIndex++}`);
+      values.push(location);
+    }
+    if (is_active !== undefined) {
+      updates.push(`is_active = $${paramIndex++}`);
+      values.push(is_active);
+    }
+
+    if (updates.length === 0) {
+      res.status(400).json({
+        success: false,
+        error: 'No fields to update'
+      });
+      return;
+    }
+
+    values.push(studentId);
+
+    const query = `
+      UPDATE delivery_users 
+      SET ${updates.join(', ')}
+      WHERE student_id = $${paramIndex}
+      RETURNING *
+    `;
+
+    const result = await pool.query(query, values);
+
+    res.status(200).json({
+      success: true,
+      message: 'Delivery profile updated successfully',
+      profile: result.rows[0]
+    });
+  } catch (err: any) {
+    console.error('❌ Update Delivery Profile Error:', err);
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to update delivery profile',
+      context: 'delivery/updateDeliveryProfile',
+    });
+  }
+};
+
+// GET /api/deliveries/available - Get available delivery requests
+export const getAvailableDeliveries = async (req: any, res: Response): Promise<void> => {
+  try {
+    const studentId = req.user?.student_id;
+
+    if (!studentId) {
+      res.status(401).json({
+        success: false,
+        error: 'Authentication required'
+      });
+      return;
+    }
+
+    // Check if user is an active delivery user
+    const deliveryUserResult = await pool.query(
+      'SELECT id FROM delivery_users WHERE student_id = $1 AND is_active = true',
+      [studentId]
+    );
+
+    if (deliveryUserResult.rows.length === 0) {
+      res.status(403).json({
+        success: false,
+        error: 'You must be an active delivery user to view available deliveries'
+      });
+      return;
+    }
+
+    const result = await pool.query(
+      `SELECT d.*, o.total_amount, o.status as order_status,
+              s.first_name as student_first_name, s.last_name as student_last_name,
+              s.phone as student_phone
+       FROM deliveries d
+       JOIN orders o ON d.order_id = o.id
+       JOIN students s ON o.student_id = s.student_id
+       WHERE d.status = 'pending'
+       ORDER BY d.created_at DESC`
+    );
+
+    res.status(200).json({
+      success: true,
+      deliveries: result.rows
+    });
+  } catch (err: any) {
+    console.error('❌ Get Available Deliveries Error:', err);
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to fetch available deliveries',
+      context: 'delivery/getAvailableDeliveries',
+    });
+  }
+};
+
+// POST /api/deliveries/:id/accept - Accept a delivery request
+export const acceptDelivery = async (req: any, res: Response): Promise<void> => {
+  try {
+    const studentId = req.user?.student_id;
+    const { id } = req.params;
+
+    if (!studentId) {
+      res.status(401).json({
+        success: false,
+        error: 'Authentication required'
+      });
+      return;
+    }
+
+    // Check if user is an active delivery user
+    const deliveryUserResult = await pool.query(
+      'SELECT id FROM delivery_users WHERE student_id = $1 AND is_active = true',
+      [studentId]
+    );
+
+    if (deliveryUserResult.rows.length === 0) {
+      res.status(403).json({
+        success: false,
+        error: 'You must be an active delivery user to accept deliveries'
+      });
+      return;
+    }
+
+    // Check if delivery exists and is pending
+    const deliveryResult = await pool.query(
+      'SELECT * FROM deliveries WHERE id = $1 AND status = $2',
+      [id, 'pending']
+    );
+
+    if (deliveryResult.rows.length === 0) {
+      res.status(404).json({
+        success: false,
+        error: 'Delivery not found or already accepted'
+      });
+      return;
+    }
+
+    const delivery = deliveryResult.rows[0];
 
     // Update delivery status
-    let updateDeliveryQuery = `UPDATE deliveries SET status = 'completed', completed_at = NOW()`;
-    let params: any[] = [deliveryId, studentId];
-
-    if (rating !== undefined) {
-      updateDeliveryQuery += `, rating = $${params.length + 1}`;
-      params.push(rating);
-    }
-    if (review) {
-      const reviewIndex = params.length + 1;
-      updateDeliveryQuery += `, review = $${reviewIndex}`;
-      params.push(review);
-    }
-
-    updateDeliveryQuery += ` WHERE id = $1 AND delivery_person_id = $2 AND status IN ('assigned', 'in_progress')`;
-
-    console.log('Executing updateDeliveryQuery:', updateDeliveryQuery);
-    console.log('With params:', params);
-
-    const result = await pool.query(updateDeliveryQuery, params);
-
-    if (result.rowCount === 0) {
-      res.status(404).json({ error: 'Delivery not found or already completed' });
-      return;
-    }
-
-    // Update order status to 'delivered' and payment_status to 'paid' when delivery is completed
     await pool.query(
-      `UPDATE orders
-       SET status = 'delivered', payment_status = 'paid', updated_at = NOW()
-       WHERE id = (SELECT order_id FROM deliveries WHERE id = $1)`,
-      [deliveryId]
+      `UPDATE deliveries 
+       SET status = 'accepted', delivery_user_id = $1, accepted_at = NOW()
+       WHERE id = $2`,
+      [studentId, id]
     );
 
-    // Send notification to customer about delivery completion
+    // Update order status
+    await pool.query(
+      `UPDATE orders SET status = 'out_for_delivery' WHERE id = $1`,
+      [delivery.order_id]
+    );
+
+    // Notify the customer
     try {
-      const deliveryInfo = await pool.query(
-        `SELECT d.order_id, o.order_number, p.title as product_title, d.customer_id
-         FROM deliveries d
-         JOIN orders o ON d.order_id = o.id
-         JOIN products p ON o.product_id = p.id
-         WHERE d.id = $1`,
-        [deliveryId]
+      const orderResult = await pool.query(
+        'SELECT student_id FROM orders WHERE id = $1',
+        [delivery.order_id]
       );
 
-      if (deliveryInfo.rows.length > 0) {
-        const { order_id, order_number, product_title, customer_id } = deliveryInfo.rows[0];
-
-        await notificationService.createDeliveryStatusNotification(
-          customer_id,
-          order_id,
-          'completed',
-          {
-            order_number,
-            product_title
-          }
-        );
-
-        // Also send payment confirmation notification
-        await notificationService.createPaymentStatusNotification(
-          customer_id,
-          order_id,
-          'paid',
-          {
-            order_number,
-            product_title
-          }
+      if (orderResult.rows.length > 0) {
+        await notificationService.createOrderStatusNotification(
+          orderResult.rows[0].student_id,
+          delivery.order_id,
+          'out_for_delivery'
         );
       }
-    } catch (notificationError) {
-      console.error('Failed to send delivery completion notification:', notificationError);
-      // Don't fail the request if notification fails
+    } catch (notifyError) {
+      console.warn('Failed to send delivery acceptance notification:', notifyError);
     }
 
-    // Update delivery person's rating if rating provided
-    if (rating !== undefined) {
-      console.log('Updating rating for studentId:', studentId, 'with rating:', rating);
-      await pool.query(
-        `UPDATE students
-         SET delivery_rating = (
-           SELECT AVG(rating::decimal) FROM deliveries WHERE delivery_person_id = $1 AND rating IS NOT NULL
-         ),
-         delivery_review_count = (
-           SELECT COUNT(*) FROM deliveries WHERE delivery_person_id = $1 AND rating IS NOT NULL
-         )
-         WHERE student_id = $1`,
-        [studentId]
-      );
-    }
-
-    res.json({ success: true, message: 'Delivery completed successfully' });
-  } catch (error) {
-    console.error('Error completing delivery:', error);
-    console.error('Error details:', {
-      message: error instanceof Error ? error.message : 'Unknown error',
-      stack: error instanceof Error ? error.stack : undefined,
-      code: (error as any)?.code,
-      detail: (error as any)?.detail
+    res.status(200).json({
+      success: true,
+      message: 'Delivery accepted successfully'
     });
-    res.status(500).json({ error: 'Failed to complete delivery' });
+  } catch (err: any) {
+    console.error('❌ Accept Delivery Error:', err);
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to accept delivery',
+      context: 'delivery/acceptDelivery',
+    });
   }
 };
 
-/**
- * Get pending deliveries for the authenticated delivery person
- */
-export const getPendingDeliveries = async (req: AuthRequest, res: Response): Promise<void> => {
+// POST /api/deliveries/:id/complete - Mark delivery as completed
+export const completeDelivery = async (req: any, res: Response): Promise<void> => {
   try {
-    const studentId = String(req.user!.student_id);
+    const studentId = req.user?.student_id;
+    const { id } = req.params;
 
-    const result = await pool.query(
-      `SELECT d.*,
-             s.first_name as customer_first_name, s.last_name as customer_last_name,
-             uh1.full_name as pickup_hall, uh2.full_name as delivery_hall
-       FROM deliveries d
-       LEFT JOIN students s ON d.customer_id = s.student_id
-       LEFT JOIN university_halls uh1 ON d.pickup_hall_id = uh1.id
-       LEFT JOIN university_halls uh2 ON d.delivery_hall_id = uh2.id
-       WHERE d.delivery_person_id = $1 AND d.status IN ('pending', 'assigned', 'in_progress')
-       ORDER BY d.created_at DESC
-       LIMIT 20`,
+    if (!studentId) {
+      res.status(401).json({
+        success: false,
+        error: 'Authentication required'
+      });
+      return;
+    }
+
+    // Check if delivery exists and belongs to this delivery user
+    const deliveryResult = await pool.query(
+      'SELECT * FROM deliveries WHERE id = $1 AND delivery_user_id = $2 AND status = $3',
+      [id, studentId, 'accepted']
+    );
+
+    if (deliveryResult.rows.length === 0) {
+      res.status(404).json({
+        success: false,
+        error: 'Delivery not found or not assigned to you'
+      });
+      return;
+    }
+
+    const delivery = deliveryResult.rows[0];
+
+    // Update delivery status
+    await pool.query(
+      `UPDATE deliveries 
+       SET status = 'completed', completed_at = NOW()
+       WHERE id = $1`,
+      [id]
+    );
+
+    // Update order status
+    await pool.query(
+      `UPDATE orders SET status = 'delivered' WHERE id = $1`,
+      [delivery.order_id]
+    );
+
+    // Update delivery user stats
+    await pool.query(
+      `UPDATE delivery_users 
+       SET total_deliveries = total_deliveries + 1
+       WHERE student_id = $1`,
       [studentId]
     );
 
-    res.json({ success: true, pending_deliveries: result.rows });
-  } catch (error) {
-    console.error('Error fetching pending deliveries:', error);
-    res.status(500).json({ error: 'Failed to fetch pending deliveries' });
+    // Notify the customer
+    try {
+      const orderResult = await pool.query(
+        'SELECT student_id FROM orders WHERE id = $1',
+        [delivery.order_id]
+      );
+
+      if (orderResult.rows.length > 0) {
+        await notificationService.createOrderStatusNotification(
+          orderResult.rows[0].student_id,
+          delivery.order_id,
+          'delivered'
+        );
+      }
+    } catch (notifyError) {
+      console.warn('Failed to send delivery completion notification:', notifyError);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Delivery completed successfully'
+    });
+  } catch (err: any) {
+    console.error('❌ Complete Delivery Error:', err);
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to complete delivery',
+      context: 'delivery/completeDelivery',
+    });
   }
 };
 
-/**
- * Get available deliveries (unassigned pending deliveries) for delivery persons
- */
-export const getAvailableDeliveries = async (req: AuthRequest, res: Response): Promise<void> => {
+// GET /api/deliveries/my-deliveries - Get delivery user's assigned deliveries
+export const getMyDeliveries = async (req: any, res: Response): Promise<void> => {
   try {
-    const studentId = String(req.user!.student_id);
+    const studentId = req.user?.student_id;
 
-    // Check if delivery person has unfinished delivery
-    const unfinishedDeliveryCheck = await pool.query(
-      `SELECT COUNT(*) as count FROM deliveries 
-       WHERE delivery_person_id = $1 AND status IN ('assigned', 'in_progress')`,
-      [studentId]
-    );
-
-    if (parseInt(unfinishedDeliveryCheck.rows[0].count) > 0) {
-      res.json({ success: true, available_deliveries: [], has_unfinished_delivery: true });
+    if (!studentId) {
+      res.status(401).json({
+        success: false,
+        error: 'Authentication required'
+      });
       return;
     }
 
     const result = await pool.query(
-      `SELECT d.*,
-             s.first_name as customer_first_name, s.last_name as customer_last_name,
-             uh1.full_name as pickup_hall, uh2.full_name as delivery_hall
+      `SELECT d.*, o.total_amount, o.status as order_status,
+              s.first_name as student_first_name, s.last_name as student_last_name,
+              s.phone as student_phone
        FROM deliveries d
-       LEFT JOIN students s ON d.customer_id = s.student_id
-       LEFT JOIN university_halls uh1 ON d.pickup_hall_id = uh1.id
-       LEFT JOIN university_halls uh2 ON d.delivery_hall_id = uh2.id
-       WHERE d.delivery_person_id IS NULL AND d.status = 'pending'
-       AND (d.seller_id != $1 OR $1 = '22243185')
-       ORDER BY d.created_at DESC
-       LIMIT 20`,
+       JOIN orders o ON d.order_id = o.id
+       JOIN students s ON o.student_id = s.student_id
+       WHERE d.delivery_user_id = $1
+       ORDER BY d.created_at DESC`,
       [studentId]
     );
 
-    res.json({ success: true, available_deliveries: result.rows, has_unfinished_delivery: false });
-  } catch (error) {
-    console.error('Error fetching available deliveries:', error);
-    res.status(500).json({ error: 'Failed to fetch available deliveries' });
+    res.status(200).json({
+      success: true,
+      deliveries: result.rows
+    });
+  } catch (err: any) {
+    console.error('❌ Get My Deliveries Error:', err);
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to fetch your deliveries',
+      context: 'delivery/getMyDeliveries',
+    });
   }
 };
-
-// Export middleware
-export { requireDeliveryRole };
