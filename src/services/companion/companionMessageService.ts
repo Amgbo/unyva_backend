@@ -1,16 +1,52 @@
-import { getMessagesForBooking, markMessagesRead as markMessagesReadModel, sendMessage } from '../../models/companion/companionMessageModel.js';
+import {
+  getMessagesForBooking,
+  getMessagesForThread,
+  getDmThreadsForUser,
+  getUnreadDmCount,
+  markMessagesRead as markMessagesReadModel,
+  sendMessage,
+  type ThreadType,
+} from '../../models/companion/companionMessageModel.js';
 
 export async function sendCompanionMessage(params: {
   booking_id: string;
   sender_id: string;
   receiver_id: string;
   content: string;
+  thread_type?: ThreadType;
 }) {
   return sendMessage(params);
 }
 
+export async function sendDirectMessage(params: {
+  sender_id: string;
+  receiver_id: string;
+  content: string;
+  thread_id: string; // dm:userA:userB format
+}) {
+  return sendMessage({
+    booking_id: params.thread_id,
+    sender_id: params.sender_id,
+    receiver_id: params.receiver_id,
+    content: params.content,
+    thread_type: 'dm',
+  });
+}
+
 export async function getBookingMessages(bookingId: string) {
   return getMessagesForBooking(bookingId);
+}
+
+export async function getThreadMessages(threadId: string) {
+  return getMessagesForThread(threadId);
+}
+
+export async function getUserDmThreads(userId: string) {
+  return getDmThreadsForUser(userId);
+}
+
+export async function getUnreadDmCounts(userId: string) {
+  return getUnreadDmCount(userId);
 }
 
 export async function markMessagesRead(params: { booking_id: string; receiver_id: string }) {
@@ -28,4 +64,3 @@ export async function countUnreadMessages(params: { booking_id: string; receiver
   );
   return result.rows[0]?.count ?? 0;
 }
-

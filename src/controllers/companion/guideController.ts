@@ -139,11 +139,11 @@ export async function getMyDashboardController(req: Request, res: Response) {
       }
     }
 
-    // Also count direct-message threads (dm: prefix).
+    // Also count direct-message threads (dm: prefix) using thread_type column.
     const dmResult = await pool.query(
       `SELECT booking_id, COUNT(*)::int AS count
        FROM companion_messages
-       WHERE receiver_id = $1 AND is_read = false AND booking_id LIKE 'dm:%'
+       WHERE receiver_id = $1 AND is_read = false AND thread_type = 'dm'
        GROUP BY booking_id;`,
       [student_id]
     );

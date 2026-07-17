@@ -137,17 +137,33 @@ export const markMessagesAsRead = async (productId: number, userId: string): Pro
   }
 };
 
-// Get inbox items for seller (products with messages)
-export const getSellerInbox = async (sellerId: string): Promise<any[]> => {
+// Get inbox items for user (both as seller and buyer)
+export const getSellerInbox = async (userId: string): Promise<any[]> => {
   try {
     const query = `
-      WITH latest_messages AS (
+      WITH user_products AS (
+        -- Products the user owns (as seller)
+        SELECT id as product_id FROM products WHERE student_id = $1
+      ),
+      messaged_products AS (
+        -- Products the user has sent messages about (as buyer)
+        SELECT DISTINCT product_id FROM product_messages WHERE sender_id = $1
+      ),
+      all_products AS (
+        -- Combine both
+        SELECT product_id FROM user_products
+        UNION
+        SELECT product_id FROM messaged_products
+      ),
+      latest_messages AS (
         SELECT DISTINCT ON (product_id)
           product_id,
           message,
-          created_at
+          created_at,
+          sender_id,
+          receiver_id
         FROM product_messages
-        WHERE product_id IN (SELECT id FROM products WHERE student_id = $1)
+        WHERE product_id IN (SELECT product_id FROM all_products)
         ORDER BY product_id, created_at DESC
       ),
       unread_counts AS (
@@ -157,6 +173,19 @@ export const getSellerInbox = async (sellerId: string): Promise<any[]> => {
         FROM product_messages
         WHERE receiver_id = $1 AND is_read = false
         GROUP BY product_id
+      ),
+      other_users AS (
+        -- Get the other user in each conversation
+        SELECT DISTINCT ON (product_id)
+          product_id,
+          CASE 
+            WHEN pm.sender_id = $1 THEN pm.receiver_id
+            ELSE pm.sender_id
+          END as other_user_id
+        FROM product_messages pm
+        WHERE pm.product_id IN (SELECT product_id FROM all_products)
+          AND (pm.sender_id = $1 OR pm.receiver_id = $1)
+        ORDER BY product_id, created_at DESC
       )
       SELECT
         p.id as product_id,
@@ -164,17 +193,42 @@ export const getSellerInbox = async (sellerId: string): Promise<any[]> => {
         pi.image_url as product_image,
         lm.message as last_message,
         lm.created_at as last_message_time,
-        COALESCE(uc.unread_count, 0) as unread_count
+        COALESCE(uc.unread_count, 0) as unread_count,
+        ou.other_user_id,
+        s.first_name as other_user_first_name,
+        s.last_name as other_user_last_name,
+        s.profile_picture as other_user_profile_picture,
+        s.hall_of_residence as other_user_hall,
+        s.program as other_user_program
       FROM products p
       LEFT JOIN product_images pi ON p.id = pi.product_id AND pi.is_primary = true
       JOIN latest_messages lm ON p.id = lm.product_id
       LEFT JOIN unread_counts uc ON p.id = uc.product_id
-      WHERE p.student_id = $1
+      LEFT JOIN other_users ou ON p.id = ou.product_id
+      LEFT JOIN students s ON ou.other_user_id = s.student_id
+      WHERE p.id IN (SELECT product_id FROM all_products)
       ORDER BY lm.created_at DESC
     `;
 
-    const result = await pool.query(query, [sellerId]);
-    return result.rows;
+    const result = await pool.query(query, [userId]);
+    
+    // Transform the result to include other_user_profile
+    return result.rows.map((row: any) => ({
+      product_id: row.product_id,
+      product_title: row.product_title,
+      product_image: row.product_image,
+      last_message: row.last_message,
+      last_message_time: row.last_message_time,
+      unread_count: row.unread_count,
+      other_user_profile: row.other_user_id ? {
+        id: row.other_user_id,
+        first_name: row.other_user_first_name,
+        last_name: row.other_user_last_name,
+        profile_picture: row.other_user_profile_picture,
+        hall_of_residence: row.other_user_hall,
+        program: row.other_user_program,
+      } : null,
+    }));
   } catch (error) {
     console.error('Database error in getSellerInbox:', error);
     throw error;
