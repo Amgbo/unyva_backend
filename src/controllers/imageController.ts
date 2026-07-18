@@ -67,8 +67,69 @@ export const uploadImage = async (req: any, res: Response): Promise<void> => {
   }
 };
 
+// ---------------------------------------------------------------------------
+// Backward-compatible exports required by src/routes/imageRoutes.ts
+// ---------------------------------------------------------------------------
+
+export const uploadProductImage = uploadImage;
+
+// Get image info for a filename (legacy name: getImageInfo)
+export const getImageInfo = async (req: any, res: Response): Promise<void> => {
+  try {
+    const { filename } = req.params;
+
+    if (!filename) {
+      res.status(400).json({ success: false, error: 'Filename is required' });
+      return;
+    }
+
+    if (shouldUseImageKit() && imagekit) {
+      const result: any = await imagekit.getFileDetails(filename);
+      res.status(200).json({
+        success: true,
+        data: {
+          filename,
+          url: result.url,
+          size: result.size,
+          createdAt: new Date(result.createdAt),
+          modifiedAt: new Date(result.createdAt),
+          width: result.width,
+          height: result.height,
+          format: result.fileType,
+        },
+      });
+      return;
+    }
+
+    // Local file
+    const url = getLocalUrl('products', filename);
+    res.status(200).json({
+      success: true,
+      data: {
+        filename,
+        url,
+        // Local metadata not available without fs; keep fields for backward compatibility.
+        size: null,
+        createdAt: null,
+        modifiedAt: null,
+        width: null,
+        height: null,
+        format: null,
+      },
+    });
+  } catch (err: any) {
+    console.error('❌ Error getting image info:', err);
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to get image information',
+      context: 'image/getImageInfo',
+    });
+  }
+};
+
 // POST /api/images/upload-multiple - Upload multiple images
 export const uploadMultipleImages = async (req: any, res: Response): Promise<void> => {
+
   try {
     console.log('📸 Multiple image upload request received');
 
@@ -175,3 +236,7 @@ export const deleteImage = async (req: any, res: Response): Promise<void> => {
     });
   }
 };
+
+// Late-bound backward-compatible aliases (after declarations to avoid TDZ)
+export const uploadMultipleProductImages = uploadMultipleImages;
+export const deleteProductImage = deleteImage;

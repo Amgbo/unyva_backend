@@ -1,5 +1,5 @@
 import express from "express";
-import { getCart, addItemToCart, updateCartItem, removeItemFromCart, checkoutCart, clearAndAddItem } from "../controllers/cartController.js";
+import { getCart, addToCart, updateCartItem, removeFromCart, clearCart } from "../controllers/cartController.js";
 import { verifyToken } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
@@ -8,10 +8,9 @@ const router = express.Router();
 router.use(verifyToken);
 
 router.get("/", getCart);
-router.post("/add", addItemToCart);
-router.post("/clear-and-add", clearAndAddItem);
+router.post("/add", addToCart);
+router.post("/clear", clearCart);
 router.put("/item/:cartItemId", updateCartItem);
-router.delete("/:cartItemId", removeItemFromCart);
-router.post("/checkout", checkoutCart);
+router.delete("/:cartItemId", removeFromCart);
 
 export default router;

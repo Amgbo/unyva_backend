@@ -4,6 +4,45 @@ import { deliveryCodeManager } from '../utils/DeliveryCodeManager.js';
 import { notificationService } from '../services/notificationService.js';
 import { handleControllerError } from '../utils/apiError.js';
 
+// ---------------------------------------------------------------------------
+// Backward-compatible role middleware + legacy controllers
+// ---------------------------------------------------------------------------
+
+// Older routes expect `requireDeliveryRole` middleware.
+// This project now uses `delivery_users` + `is_active`; we keep the same behavior
+// by checking active delivery user membership.
+export const requireDeliveryRole = (req: any, res: Response, next: any): void => {
+  // If auth middleware sets a role, accept it (keeps older behavior)
+  if (req.user?.role === 'delivery') return next();
+
+  const studentId = req.user?.student_id;
+  if (!studentId) {
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+
+  // Async check using DB, but keep signature compatibility
+  (async () => {
+    try {
+      const r = await pool.query(
+        'SELECT 1 FROM delivery_users WHERE student_id = $1 AND is_active = true LIMIT 1',
+        [studentId]
+      );
+      if (r.rows.length === 0) {
+        res.status(403).json({ error: 'Access denied. Delivery role required.' });
+        return;
+      }
+      next();
+    } catch (e: any) {
+      handleControllerError(res, e, {
+        statusCode: 500,
+        publicError: 'Failed to verify delivery role',
+        context: 'delivery/requireDeliveryRole',
+      });
+    }
+  })();
+};
+
 // GET /api/deliveries/verify-code/:code - Verify a delivery code
 export const verifyDeliveryCode = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -477,6 +516,7 @@ export const getMyDeliveries = async (req: any, res: Response): Promise<void> =>
   try {
     const studentId = req.user?.student_id;
 
+
     if (!studentId) {
       res.status(401).json({
         success: false,
@@ -510,3 +550,144 @@ export const getMyDeliveries = async (req: any, res: Response): Promise<void> =>
     });
   }
 };
+
+// ---------------------------------------------------------------------------
+// Legacy exports required by src/routes/deliveryRoutes.ts
+// ---------------------------------------------------------------------------
+
+// Legacy name: getDeliveryStats
+export const getDeliveryStats = async (req: any, res: Response): Promise<void> => {
+  try {
+    const studentId = req.user?.student_id;
+    if (!studentId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+
+    const totalResult = await pool.query(
+      "SELECT COUNT(*)::int AS total FROM deliveries WHERE delivery_user_id = $1",
+      [studentId]
+    );
+    const completedResult = await pool.query(
+      "SELECT COUNT(*)::int AS completed FROM deliveries WHERE delivery_user_id = $1 AND status = 'completed'",
+      [studentId]
+    );
+    const pendingResult = await pool.query(
+      "SELECT COUNT(*)::int AS pending FROM deliveries WHERE delivery_user_id = $1 AND status IN ('pending','accepted')",
+      [studentId]
+    );
+    const ratingResult = await pool.query(
+      "SELECT AVG(rating)::float AS average_rating FROM deliveries WHERE delivery_user_id = $1 AND rating IS NOT NULL",
+      [studentId]
+    );
+
+    res.json({
+      success: true,
+      stats: {
+        total_deliveries: totalResult.rows[0]?.total ?? 0,
+        completed_deliveries: completedResult.rows[0]?.completed ?? 0,
+        pending_deliveries: pendingResult.rows[0]?.pending ?? 0,
+        average_rating: Number(ratingResult.rows[0]?.average_rating ?? 0),
+      },
+    });
+  } catch (err: any) {
+    console.error('❌ Get Delivery Stats Error:', err);
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to fetch delivery stats',
+      context: 'delivery/getDeliveryStats',
+    });
+  }
+};
+
+// Legacy name: getDeliveries (list all assigned deliveries, optionally filtered by status/page/limit)
+export const getDeliveries = async (req: any, res: Response): Promise<void> => {
+  try {
+    const studentId = req.user?.student_id;
+    const { status } = req.query;
+    const page = Number(req.query.page ?? 1);
+    const limit = Number(req.query.limit ?? 10);
+    const offset = (page - 1) * limit;
+
+    if (!studentId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+
+    let query = `
+      SELECT d.*, o.total_amount, o.status as order_status,
+             s.first_name as customer_first_name, s.last_name as customer_last_name,
+             s.phone as customer_phone
+      FROM deliveries d
+      JOIN orders o ON d.order_id = o.id
+      JOIN students s ON o.student_id = s.student_id
+      WHERE d.delivery_user_id = $1
+    `;
+    const params: any[] = [studentId];
+
+    if (status && typeof status === 'string') {
+      query += ' AND d.status = $2';
+      params.push(status);
+    }
+
+    query += ' ORDER BY d.created_at DESC LIMIT $' + (params.length + 1) + ' OFFSET $' + (params.length + 2);
+    params.push(limit, offset);
+
+    const rowsResult = await pool.query(query, params);
+
+    res.json({
+      success: true,
+      deliveries: rowsResult.rows,
+      pagination: { page, limit },
+    });
+  } catch (err: any) {
+    console.error('❌ Get Deliveries Error:', err);
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to fetch deliveries',
+      context: 'delivery/getDeliveries',
+    });
+  }
+};
+
+// Legacy name: getPendingDeliveries (for assignment)
+export const getPendingDeliveries = async (req: any, res: Response): Promise<void> => {
+  try {
+    // same as "available" concept, but keep pending in a compatible response shape
+    const studentId = req.user?.student_id;
+    if (!studentId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+
+    const pendingResult = await pool.query(
+      `
+      SELECT d.*, o.total_amount, o.status as order_status,
+             s.first_name as student_first_name, s.last_name as student_last_name,
+             s.phone as student_phone
+      FROM deliveries d
+      JOIN orders o ON d.order_id = o.id
+      JOIN students s ON o.student_id = s.student_id
+      WHERE d.status = 'pending'
+      ORDER BY d.created_at DESC
+      LIMIT 20
+      `
+    );
+
+    res.json({
+      success: true,
+      pending_deliveries: pendingResult.rows,
+    });
+  } catch (err: any) {
+    console.error('❌ Get Pending Deliveries Error:', err);
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to fetch pending deliveries',
+      context: 'delivery/getPendingDeliveries',
+    });
+  }
+};
+
+// Also provide aliases for potential old naming
+export const getDeliveryRequests = getPendingDeliveries;
+export const getDeliveryAssigned = getMyDeliveries;

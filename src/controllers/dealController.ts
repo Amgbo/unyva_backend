@@ -280,3 +280,22 @@ export const deleteDeal = async (req: any, res: Response): Promise<void> => {
     });
   }
 };
+
+// Backward-compatible controller export expected by older routes
+export const DealController = {
+  getDeals,
+  getDealById,
+  addDeal,
+  updateDeal,
+  deleteDeal,
+};
+
+// ---------------------------------------------------------------------------
+// Backward-compatible named exports (older code sometimes imports functions directly)
+// ---------------------------------------------------------------------------
+export const getAllDeals = getDeals;
+export const getDeal = getDealById;
+export const createDeal = addDeal;
+export const updateDealConfirm = updateDeal;
+
+

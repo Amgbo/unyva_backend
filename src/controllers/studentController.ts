@@ -8,6 +8,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
 // POST /api/students/register - Register a new student
 export const registerStudent = async (req: Request, res: Response): Promise<void> => {
+
   try {
     const { student_id, first_name, last_name, email, password, phone, university_id, hall_id, room_number } = req.body;
 
@@ -290,4 +291,32 @@ export const getPublicStudentInfo = async (req: Request, res: Response): Promise
       context: 'student/getPublicStudentInfo',
     });
   }
+};
+
+// ---------------------------------------------------------------------------
+// Legacy/backward-compatible exports required by src/routes/studentroutes.ts
+// ---------------------------------------------------------------------------
+
+// Step-1 registration legacy name
+export const registerStep1 = registerStudent;
+
+// Complete registration legacy name (best-effort: update profile using provided fields)
+export const completeRegistration = updateProfile;
+
+// Email verification legacy name (not present in this controller snapshot)
+export const verifyEmail = async (_req: any, res: Response): Promise<void> => {
+  res.status(501).json({ success: false, error: 'verifyEmail not implemented' });
+};
+
+// Login is already compatible
+// export const loginStudent already exists and is imported directly by routes
+
+// Profile legacy names
+export const getStudentProfile = getProfile;
+export const getStudentProfileById = getPublicStudentInfo;
+export const updateStudentProfile = updateProfile;
+
+// Delete account legacy name
+export const deleteAccount = async (_req: any, res: Response): Promise<void> => {
+  res.status(501).json({ success: false, error: 'deleteAccount not implemented' });
 };

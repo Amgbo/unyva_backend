@@ -4,6 +4,7 @@ import { handleControllerError } from '../utils/apiError.js';
 
 // GET /api/services - Get all services
 export const getServices = async (req: Request, res: Response): Promise<void> => {
+
   try {
     const { category, search, limit = 50, offset = 0 } = req.query;
 
@@ -252,3 +253,40 @@ export const getMyServices = async (req: any, res: Response): Promise<void> => {
     });
   }
 };
+
+// ---------------------------------------------------------------------------
+// Legacy/backward-compatible exports required by src/routes/serviceRoutes.ts
+// ---------------------------------------------------------------------------
+
+export const getService = getServiceById;
+export const createNewService = createService;
+export const updateExistingService = updateService;
+export const deleteExistingService = deleteService;
+
+export const getFeaturedServicesController = getServices;
+
+// The following endpoints are referenced by routes but are not implemented
+// in this controller snapshot. Provide best-effort stubs so TypeScript can
+// compile without changing route files.
+
+const notImplemented = (publicError: string) => {
+  return (req: any, res: Response): Promise<void> => {
+    res.status(501).json({ success: false, error: publicError });
+    return Promise.resolve();
+  };
+};
+
+export const getServiceReviewsController = notImplemented('Service reviews not implemented');
+export const getProviderStatsController = notImplemented('Provider stats not implemented');
+export const createBookingController = notImplemented('Service booking not implemented');
+export const getProviderBookingsController = notImplemented('Provider bookings not implemented');
+export const getBuyerBookingsController = notImplemented('Buyer bookings not implemented');
+export const updateBookingStatusController = notImplemented('Booking status update not implemented');
+
+export const getNotificationsController = notImplemented('Notifications not implemented');
+export const markNotificationReadController = notImplemented('Mark notification read not implemented');
+
+export const createReviewController = notImplemented('Service review creation not implemented');
+export const deleteServiceReviewController = notImplemented('Service review deletion not implemented');
+export const canUserReviewServiceController = notImplemented('Service review permission check not implemented');
+export const getUserReviewForServiceController = notImplemented('Get service review not implemented');

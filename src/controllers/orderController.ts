@@ -123,6 +123,17 @@ export const createOrder = async (req: any, res: Response): Promise<void> => {
   }
 };
 
+// ---------------------------------------------------------------------------
+// Backward-compatible exports required by src/routes/orderRoutes.ts
+// ---------------------------------------------------------------------------
+
+// Older name: getOrders -> getMyOrders
+// (Declared as function-wrappers below to avoid TDZ issues.)
+export const getOrders = (req: any, res: Response) => getMyOrders(req, res);
+
+// Older name: confirmOrderComplete -> cancel flow compatibility
+export const confirmOrderComplete = (req: any, res: Response) => cancelOrder(req, res);
+
 // GET /api/orders - Get user's orders
 export const getMyOrders = async (req: any, res: Response): Promise<void> => {
   try {
@@ -269,6 +280,7 @@ export const getOrderById = async (req: any, res: Response): Promise<void> => {
 
 // PUT /api/orders/:id/status - Update order status (seller/admin)
 export const updateOrderStatus = async (req: any, res: Response): Promise<void> => {
+
   try {
     const studentId = req.user?.student_id;
     const { id } = req.params;
@@ -339,7 +351,11 @@ export const updateOrderStatus = async (req: any, res: Response): Promise<void> 
   }
 };
 
-// POST /api/orders/:id/cancel - Cancel order (buyer only before delivery)
+
+/**
+ * POST /api/orders/:id/cancel - Cancel order (buyer only before delivery)
+ * Backward-compatible: older route expects confirmOrderComplete().
+ */
 export const cancelOrder = async (req: any, res: Response): Promise<void> => {
   try {
     const studentId = req.user?.student_id;

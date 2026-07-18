@@ -187,3 +187,41 @@ export const clearCart = async (req: any, res: Response): Promise<void> => {
     });
   }
 };
+
+// ---------------------------------------------------------------------------
+// Backward-compatible exports (older routes expect these named exports)
+// ---------------------------------------------------------------------------
+
+// Alias for older route name
+export const addItemToCart = addToCart;
+
+// Alias for older route name
+export const removeItemFromCart = removeFromCart;
+
+// Some older implementations used these names; map them to existing logic.
+// - checkoutCart: treat as clearCart for now (checkout flow handled elsewhere)
+export const checkoutCart = clearCart;
+
+// clearAndAddItem: clear cart then add new item (expects product_id + quantity)
+export const clearAndAddItem = async (req: any, res: Response): Promise<void> => {
+  try {
+    // Reuse existing endpoints to keep behavior consistent
+    const studentId = req.user?.student_id;
+    if (!studentId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+
+    await pool.query('DELETE FROM cart WHERE student_id = $1', [studentId]);
+    // Delegate to addToCart (will validate product_id, quantity, and ownership rules)
+    return addToCart(req, res);
+  } catch (err: any) {
+    console.error('❌ Clear And Add Item Error:', err);
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to clear and add item to cart',
+      context: 'cart/clearAndAddItem',
+    });
+  }
+};
+

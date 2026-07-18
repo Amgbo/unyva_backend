@@ -3,6 +3,15 @@ import { pool } from '../db.js';
 import { notificationService } from '../services/notificationService.js';
 import { handleControllerError } from '../utils/apiError.js';
 
+import {
+  getMessagesForProduct,
+  createMessage,
+  getProductOwner,
+  getLastBuyerForProduct,
+  getSellerInbox,
+  markMessagesAsRead,
+} from '../models/productMessageModel.js';
+
 // GET /api/messages/conversations - Get user's conversations
 export const getConversations = async (req: any, res: Response): Promise<void> => {
   try {
@@ -43,6 +52,172 @@ export const getConversations = async (req: any, res: Response): Promise<void> =
       statusCode: 500,
       publicError: 'Failed to fetch conversations',
       context: 'message/getConversations',
+    });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Backward-compatible exports required by src/routes/messageRoutes.ts
+// ---------------------------------------------------------------------------
+
+// POST /api/messages/product - Send a message for a product (legacy contract)
+export const sendProductMessage = async (req: any, res: Response): Promise<void> => {
+  try {
+    const senderId = req.user?.student_id;
+    const { product_id, message } = req.body;
+
+    if (!senderId) {
+      res.status(401).json({ error: 'Unauthorized: No user ID found in token' });
+      return;
+    }
+
+    const productIdNum = Number(product_id);
+    if (!productIdNum || !message || String(message).trim().length === 0) {
+      res.status(400).json({ success: false, error: 'Product ID and non-empty message are required' });
+      return;
+    }
+
+    // Get product owner (seller)
+    const sellerId = await getProductOwner(productIdNum);
+    if (!sellerId) {
+      res.status(404).json({ success: false, error: 'Product not found' });
+      return;
+    }
+
+    let receiverId: string;
+    if (String(senderId) === String(sellerId)) {
+      // Sender is seller, find last buyer who messaged
+      const lastBuyerId = await getLastBuyerForProduct(productIdNum, sellerId);
+      if (!lastBuyerId) {
+        res.status(400).json({ success: false, error: 'No buyer has messaged this product yet' });
+        return;
+      }
+      receiverId = lastBuyerId;
+    } else {
+      // Sender is buyer, receiver is seller
+      receiverId = sellerId;
+    }
+
+    const newMessage = await createMessage({
+      product_id: productIdNum,
+      sender_id: String(senderId),
+      receiver_id: String(receiverId),
+      message: String(message).trim(),
+    });
+
+    // Send notification to receiver (best-effort)
+    try {
+      await notificationService.createAndSend({
+        user_id: String(receiverId),
+        type: 'message',
+        title: 'New Product Inquiry',
+        message: String(message).trim(),
+        data: {
+          product_id: productIdNum,
+          sender_id: String(senderId),
+          message_id: newMessage.id,
+        },
+        priority: 'medium',
+        delivery_methods: ['push'],
+      });
+    } catch (notificationError) {
+      console.warn('Failed to send message notification:', notificationError);
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Message sent successfully',
+      data: newMessage,
+    });
+  } catch (err: any) {
+    console.error('❌ Error sending product message:', err);
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to send message',
+      context: 'message/sendProductMessage',
+    });
+  }
+};
+
+// GET /api/messages/product/:productId - Get messages for a product (legacy contract)
+export const getProductMessages = async (req: any, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.student_id;
+    const { productId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+
+    const productIdNum = Number(productId);
+    if (!productIdNum) {
+      res.status(400).json({ error: 'Invalid product ID' });
+      return;
+    }
+
+    const messages = await getMessagesForProduct(productIdNum);
+    res.status(200).json({ success: true, count: messages.length, messages });
+  } catch (err: any) {
+    console.error('❌ Error fetching product messages:', err);
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to fetch messages',
+      context: 'message/getProductMessages',
+    });
+  }
+};
+
+// POST /api/messages/mark-read/:productId - Mark messages as read for a product (legacy contract)
+export const markMessagesAsReadController = async (req: any, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.student_id;
+    const { productId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+
+    const productIdNum = Number(productId);
+    if (!productIdNum) {
+      res.status(400).json({ error: 'Invalid product ID' });
+      return;
+    }
+
+    await markMessagesAsRead(productIdNum, String(userId));
+    res.status(200).json({ success: true, message: 'Messages marked as read' });
+  } catch (err: any) {
+    console.error('❌ Error marking messages as read:', err);
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to mark messages as read',
+      context: 'message/markMessagesAsReadController',
+    });
+  }
+};
+
+// GET /api/messages/inbox - Get seller's inbox (legacy contract)
+export const getSellerInboxController = async (req: any, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.student_id;
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized: No user ID found in token' });
+      return;
+    }
+
+    const inbox = await getSellerInbox(String(userId));
+    res.status(200).json({
+      success: true,
+      count: inbox.length,
+      inbox,
+    });
+  } catch (err: any) {
+    console.error('❌ Error fetching inbox:', err);
+    handleControllerError(res, err, {
+      statusCode: 500,
+      publicError: 'Failed to fetch inbox',
+      context: 'message/getSellerInboxController',
     });
   }
 };
@@ -94,6 +269,7 @@ export const getMessages = async (req: any, res: Response): Promise<void> => {
 
 // POST /api/messages/:otherUserId - Send a message
 export const sendMessage = async (req: any, res: Response): Promise<void> => {
+
   try {
     const studentId = req.user?.student_id;
     const { otherUserId } = req.params;

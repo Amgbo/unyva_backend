@@ -8,18 +8,19 @@ const router = Router();
 router.use(authMiddleware);
 
 // Create a new deal
-router.post('/', DealController.createDeal);
+router.post('/', DealController.addDeal);
 
 // Get user's deals (buyer or seller)
-router.get('/', DealController.getUserDeals);
+router.get('/', DealController.getDeals);
 
 // Get deal by id
 router.get('/:id', DealController.getDealById);
 
 // Confirm deal
-router.put('/:id/confirm', DealController.confirmDeal);
+router.put('/:id/confirm', DealController.updateDeal);
 
 // Delete deal
 router.delete('/:id', DealController.deleteDeal);
 
 export default router;
+
