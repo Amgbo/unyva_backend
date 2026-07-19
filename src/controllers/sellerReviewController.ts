@@ -1,7 +1,6 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/authMiddleware.js';
 import { SellerReviewModel } from '../models/sellerReviewModel.js';
-import { handleControllerError } from '../utils/apiError.js';
 
 export class SellerReviewController {
   // Create a new seller review
@@ -24,11 +23,7 @@ export class SellerReviewController {
       res.status(201).json({ review });
     } catch (error) {
       console.error('Error creating seller review:', error);
-      handleControllerError(res, error, {
-        statusCode: 400,
-        publicError: 'Failed to create review',
-        context: 'sellerReview/createReview',
-      });
+      res.status(400).json({ error: error instanceof Error ? error.message : 'Unknown error' });
     }
   }
 
@@ -43,11 +38,7 @@ export class SellerReviewController {
       res.json(result);
     } catch (error) {
       console.error('Error fetching seller reviews:', error);
-      handleControllerError(res, error, {
-        statusCode: 500,
-        publicError: 'Failed to fetch reviews',
-        context: 'sellerReview/getSellerReviews',
-      });
+      res.status(500).json({ error: 'Internal server error' });
     }
   }
 
@@ -71,11 +62,7 @@ export class SellerReviewController {
       res.json({ review });
     } catch (error) {
       console.error('Error fetching review:', error);
-      handleControllerError(res, error, {
-        statusCode: 500,
-        publicError: 'Failed to fetch review',
-        context: 'sellerReview/getReviewById',
-      });
+      res.status(500).json({ error: 'Internal server error' });
     }
   }
 
@@ -99,11 +86,7 @@ export class SellerReviewController {
       res.json({ review: updatedReview });
     } catch (error) {
       console.error('Error updating review:', error);
-      handleControllerError(res, error, {
-        statusCode: 400,
-        publicError: 'Failed to update review',
-        context: 'sellerReview/updateReview',
-      });
+      res.status(400).json({ error: error instanceof Error ? error.message : 'Unknown error' });
     }
   }
 
@@ -126,11 +109,7 @@ export class SellerReviewController {
       res.json({ message: 'Review deleted successfully' });
     } catch (error) {
       console.error('Error deleting review:', error);
-      handleControllerError(res, error, {
-        statusCode: 400,
-        publicError: 'Failed to delete review',
-        context: 'sellerReview/deleteReview',
-      });
+      res.status(400).json({ error: error instanceof Error ? error.message : 'Unknown error' });
     }
   }
 
@@ -148,11 +127,7 @@ export class SellerReviewController {
       res.json({ canReview });
     } catch (error) {
       console.error('Error checking review eligibility:', error);
-      handleControllerError(res, error, {
-        statusCode: 500,
-        publicError: 'Failed to check review eligibility',
-        context: 'sellerReview/canUserReviewDeal',
-      });
+      res.status(500).json({ error: 'Internal server error' });
     }
   }
 }

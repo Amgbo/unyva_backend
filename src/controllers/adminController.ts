@@ -1,7 +1,6 @@
 import { Request, Response } from 'express';
 import { deliveryCodeManager } from '../utils/DeliveryCodeManager.js';
 import { getAllDeleteAccountRequests, updateDeleteAccountRequestStatus } from '../models/deleteAccountModel.js';
-import { handleControllerError } from '../utils/apiError.js';
 
 // GET /api/admin/delivery-codes - Get all delivery codes (Admin only)
 export const getDeliveryCodes = async (req: any, res: Response): Promise<void> => {
@@ -28,10 +27,9 @@ export const getDeliveryCodes = async (req: any, res: Response): Promise<void> =
     });
   } catch (err: any) {
     console.error('❌ Get Delivery Codes Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to fetch delivery codes',
-      context: 'admin/getDeliveryCodes',
+    res.status(500).json({
+      error: 'Failed to fetch delivery codes',
+      message: err.message
     });
   }
 };
@@ -78,10 +76,9 @@ export const generateDeliveryCodes = async (req: any, res: Response): Promise<vo
     });
   } catch (err: any) {
     console.error('❌ Generate Delivery Codes Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to generate delivery codes',
-      context: 'admin/generateDeliveryCodes',
+    res.status(500).json({
+      error: 'Failed to generate delivery codes',
+      message: err.message
     });
   }
 };
@@ -119,10 +116,9 @@ export const revokeDeliveryCode = async (req: any, res: Response): Promise<void>
     });
   } catch (err: any) {
     console.error('❌ Revoke Delivery Code Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to revoke delivery code',
-      context: 'admin/revokeDeliveryCode',
+    res.status(500).json({
+      error: 'Failed to revoke delivery code',
+      message: err.message
     });
   }
 };
@@ -152,10 +148,9 @@ export const getDeleteAccountRequestsAdmin = async (req: any, res: Response): Pr
     });
   } catch (err: any) {
     console.error('❌ Get Delete Account Requests Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to fetch delete account requests',
-      context: 'admin/getDeleteAccountRequests',
+    res.status(500).json({
+      error: 'Failed to fetch delete account requests',
+      message: err.message
     });
   }
 };
@@ -204,10 +199,9 @@ export const updateDeleteAccountRequestAdmin = async (req: any, res: Response): 
     });
   } catch (err: any) {
     console.error('❌ Update Delete Account Request Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to update delete account request',
-      context: 'admin/updateDeleteAccountRequest',
+    res.status(500).json({
+      error: 'Failed to update delete account request',
+      message: err.message
     });
   }
 };

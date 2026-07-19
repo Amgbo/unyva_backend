@@ -68,3 +68,19 @@ VALUES
 ('AT', 'GH', '62003', '#0066CC', true),
 ('Glo', 'GH', '62006', '#00AA00', true)
 ON CONFLICT DO NOTHING;
+
+SELECT COUNT(*) FROM hotspot_measurements;
+
+SELECT column_name
+FROM information_schema.columns
+WHERE table_name = 'hotspot_coverage_summary'
+ORDER BY ordinal_position;
+
+ALTER TABLE hotspot_coverage_summary
+ADD COLUMN IF NOT EXISTS place_name TEXT;
+
+ALTER TABLE hotspot_coverage_summary
+ADD COLUMN IF NOT EXISTS formatted_address TEXT;
+
+ALTER TABLE hotspot_coverage_summary
+ADD COLUMN IF NOT EXISTS google_place_id TEXT;

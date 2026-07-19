@@ -1,8 +1,7 @@
+// src/controllers/messageController.ts
 import { Request, Response } from 'express';
+import { AuthRequest } from '../middleware/authMiddleware.js';
 import { pool } from '../db.js';
-import { notificationService } from '../services/notificationService.js';
-import { handleControllerError } from '../utils/apiError.js';
-
 import {
   getMessagesForProduct,
   createMessage,
@@ -10,86 +9,53 @@ import {
   getLastBuyerForProduct,
   getSellerInbox,
   markMessagesAsRead,
+  CreateMessageData
 } from '../models/productMessageModel.js';
+import { notificationService } from '../services/notificationService.js';
 
-// GET /api/messages/conversations - Get user's conversations
-export const getConversations = async (req: any, res: Response): Promise<void> => {
+// POST /api/messages/product - Send a message for a product
+export const sendProductMessage = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const studentId = req.user?.student_id;
-
-    if (!studentId) {
-      res.status(401).json({ error: 'Authentication required' });
-      return;
-    }
-
-    const result = await pool.query(
-      `WITH conversations AS (
-        SELECT 
-          CASE WHEN sender_id = $1 THEN receiver_id ELSE sender_id END as other_user_id,
-          MAX(created_at) as last_message_at,
-          COUNT(CASE WHEN receiver_id = $1 AND is_read = false THEN 1 END) as unread_count
-        FROM messages
-        WHERE sender_id = $1 OR receiver_id = $1
-        GROUP BY other_user_id
-      )
-      SELECT c.*, s.first_name, s.last_name, s.profile_picture,
-             m.content as last_message_content
-      FROM conversations c
-      JOIN students s ON c.other_user_id = s.student_id
-      LEFT JOIN messages m ON m.created_at = c.last_message_at
-        AND (m.sender_id = c.other_user_id OR m.receiver_id = c.other_user_id)
-      ORDER BY c.last_message_at DESC`,
-      [studentId]
-    );
-
-    res.json({
-      success: true,
-      conversations: result.rows
-    });
-  } catch (err: any) {
-    console.error('❌ Get Conversations Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to fetch conversations',
-      context: 'message/getConversations',
-    });
-  }
-};
-
-// ---------------------------------------------------------------------------
-// Backward-compatible exports required by src/routes/messageRoutes.ts
-// ---------------------------------------------------------------------------
-
-// POST /api/messages/product - Send a message for a product (legacy contract)
-export const sendProductMessage = async (req: any, res: Response): Promise<void> => {
-  try {
-    const senderId = req.user?.student_id;
+    const senderId = req.user?.id; // This should be the numeric id from students table
     const { product_id, message } = req.body;
 
     if (!senderId) {
-      res.status(401).json({ error: 'Unauthorized: No user ID found in token' });
+      res.status(401).json({
+        success: false,
+        error: 'Unauthorized: No user ID found in token'
+      });
       return;
     }
 
-    const productIdNum = Number(product_id);
-    if (!productIdNum || !message || String(message).trim().length === 0) {
-      res.status(400).json({ success: false, error: 'Product ID and non-empty message are required' });
+    // Validate input
+    if (!product_id || !message || message.trim().length === 0) {
+      res.status(400).json({
+        success: false,
+        error: 'Product ID and non-empty message are required'
+      });
       return;
     }
 
     // Get product owner (seller)
-    const sellerId = await getProductOwner(productIdNum);
+    const sellerId = await getProductOwner(product_id);
     if (!sellerId) {
-      res.status(404).json({ success: false, error: 'Product not found' });
+      res.status(404).json({
+        success: false,
+        error: 'Product not found'
+      });
       return;
     }
 
     let receiverId: string;
-    if (String(senderId) === String(sellerId)) {
+
+    if (senderId === sellerId) {
       // Sender is seller, find last buyer who messaged
-      const lastBuyerId = await getLastBuyerForProduct(productIdNum, sellerId);
+      const lastBuyerId = await getLastBuyerForProduct(product_id, sellerId);
       if (!lastBuyerId) {
-        res.status(400).json({ success: false, error: 'No buyer has messaged this product yet' });
+        res.status(400).json({
+          success: false,
+          error: 'No buyer has messaged this product yet'
+        });
         return;
       }
       receiverId = lastBuyerId;
@@ -98,305 +64,244 @@ export const sendProductMessage = async (req: any, res: Response): Promise<void>
       receiverId = sellerId;
     }
 
-    const newMessage = await createMessage({
-      product_id: productIdNum,
-      sender_id: String(senderId),
-      receiver_id: String(receiverId),
-      message: String(message).trim(),
-    });
+    // Create message
+    const messageData: CreateMessageData = {
+      product_id: parseInt(product_id, 10),
+      sender_id: senderId,
+      receiver_id: receiverId,
+      message: message.trim()
+    };
 
-    // Send notification to receiver (best-effort)
+    const newMessage = await createMessage(messageData);
+
+    // Send notification to receiver (seller when buyer messages, or buyer when seller responds)
     try {
-      await notificationService.createAndSend({
-        user_id: String(receiverId),
-        type: 'message',
-        title: 'New Product Inquiry',
-        message: String(message).trim(),
-        data: {
-          product_id: productIdNum,
-          sender_id: String(senderId),
-          message_id: newMessage.id,
-        },
-        priority: 'medium',
-        delivery_methods: ['push'],
-      });
+      // Get sender info and receiver student_id for notification
+      const userQuery = `
+        SELECT
+          s.student_id as sender_student_id,
+          s.first_name,
+          s.last_name,
+          s.profile_picture,
+          s.hall_of_residence,
+          s.room_number,
+          s.program,
+          p.title as product_title,
+          r.student_id as receiver_student_id
+        FROM students s
+        CROSS JOIN products p
+        CROSS JOIN students r
+        WHERE s.student_id = $1 AND p.id = $2 AND r.student_id = $3
+      `;
+      const userResult = await pool.query(userQuery, [senderId, product_id, receiverId]);
+
+      if (userResult.rows.length > 0) {
+        const { sender_student_id, first_name, last_name, product_title, receiver_student_id } = userResult.rows[0];
+        const senderName = `${first_name} ${last_name}`;
+
+        // Determine notification type and message
+        let notificationTitle: string;
+        let notificationMessage: string;
+        let notificationType: string;
+
+        if (senderId === sellerId) {
+          // Seller responding to buyer
+          notificationTitle = 'Seller Response';
+          notificationMessage = `${senderName} responded to your inquiry about "${product_title}"`;
+          notificationType = 'message';
+        } else {
+          // Buyer messaging seller
+          notificationTitle = 'New Product Inquiry';
+          notificationMessage = `${senderName} sent you a message about "${product_title}"`;
+          notificationType = 'message';
+        }
+
+        // Send notification to receiver using their student_id
+        await notificationService.createAndSend({
+          user_id: receiver_student_id, // ✅ Keep as string (matches DB VARCHAR(20))
+          type: notificationType,
+          title: notificationTitle,
+          message: notificationMessage,
+          data: {
+            product_id: parseInt(product_id, 10),
+            sender_id: senderId,
+            message_id: newMessage.id,
+            product_title: product_title,
+            sender_profile: {
+              id: userResult.rows[0].sender_student_id,
+              first_name: userResult.rows[0].first_name,
+              last_name: userResult.rows[0].last_name,
+              profile_picture: userResult.rows[0].profile_picture,
+              hall_of_residence: userResult.rows[0].hall_of_residence,
+              room_number: userResult.rows[0].room_number,
+              program: userResult.rows[0].program
+            }
+          },
+          priority: 'medium',
+          delivery_methods: ['push']
+        });
+
+        console.log(`📤 Notification sent to receiver ${receiver_student_id} for message about product ${product_id}`);
+      }
     } catch (notificationError) {
-      console.warn('Failed to send message notification:', notificationError);
+      console.error('❌ Error sending message notification:', notificationError);
+      // Don't fail the message sending if notification fails
     }
 
     res.status(201).json({
       success: true,
       message: 'Message sent successfully',
-      data: newMessage,
+      data: newMessage
     });
-  } catch (err: any) {
-    console.error('❌ Error sending product message:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to send message',
-      context: 'message/sendProductMessage',
+  } catch (error) {
+    console.error('❌ Error sending message:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to send message',
+      message: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 };
 
-// GET /api/messages/product/:productId - Get messages for a product (legacy contract)
-export const getProductMessages = async (req: any, res: Response): Promise<void> => {
+// GET /api/messages/product/:productId - Get messages for a product
+export const getProductMessages = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const userId = req.user?.student_id;
+    const userId = req.user?.id;
     const { productId } = req.params;
 
     if (!userId) {
-      res.status(401).json({ error: 'Authentication required' });
+      res.status(401).json({
+        success: false,
+        error: 'Unauthorized: No user ID found in token'
+      });
       return;
     }
 
-    const productIdNum = Number(productId);
-    if (!productIdNum) {
-      res.status(400).json({ error: 'Invalid product ID' });
+    const productIdNum = parseInt(productId, 10);
+    if (isNaN(productIdNum)) {
+      res.status(400).json({
+        success: false,
+        error: 'Invalid product ID'
+      });
       return;
     }
 
+    // Verify user has access to this product's messages (is buyer or seller)
+    const productOwner = await getProductOwner(productIdNum);
+    if (!productOwner) {
+      res.status(404).json({
+        success: false,
+        error: 'Product not found'
+      });
+      return;
+    }
+
+    // Check if user is the seller or has messaged this product, or is trying to message for the first time
+    const accessQuery = `
+      SELECT 1 FROM products p
+      LEFT JOIN product_messages pm ON p.id = pm.product_id
+      WHERE p.id = $1 AND (p.student_id = $2
+        OR pm.sender_id = $2 OR pm.receiver_id = $2
+        OR p.student_id != $2)  -- Allow any authenticated user to start messaging any product they don't own
+      LIMIT 1
+    `;
+    const accessResult = await pool.query(accessQuery, [productIdNum, userId]);
+
+    if (accessResult.rows.length === 0) {
+      res.status(403).json({
+        success: false,
+        error: 'Access denied: You cannot message your own product'
+      });
+      return;
+    }
+
+    // Mark messages as read for this user
+    await markMessagesAsRead(productIdNum, userId);
+
+    // Get messages
     const messages = await getMessagesForProduct(productIdNum);
-    res.status(200).json({ success: true, count: messages.length, messages });
-  } catch (err: any) {
-    console.error('❌ Error fetching product messages:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to fetch messages',
-      context: 'message/getProductMessages',
+
+    res.status(200).json({
+      success: true,
+      count: messages.length,
+      messages
+    });
+  } catch (error) {
+    console.error('❌ Error fetching messages:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch messages',
+      message: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 };
 
-// POST /api/messages/mark-read/:productId - Mark messages as read for a product (legacy contract)
-export const markMessagesAsReadController = async (req: any, res: Response): Promise<void> => {
+// GET /api/messages/inbox - Get seller's inbox
+export const getSellerInboxController = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const userId = req.user?.student_id;
-    const { productId } = req.params;
+    const userId = req.user?.id;
 
     if (!userId) {
-      res.status(401).json({ error: 'Authentication required' });
+      res.status(401).json({
+        success: false,
+        error: 'Unauthorized: No user ID found in token'
+      });
       return;
     }
 
-    const productIdNum = Number(productId);
-    if (!productIdNum) {
-      res.status(400).json({ error: 'Invalid product ID' });
-      return;
-    }
+    const inbox = await getSellerInbox(userId);
 
-    await markMessagesAsRead(productIdNum, String(userId));
-    res.status(200).json({ success: true, message: 'Messages marked as read' });
-  } catch (err: any) {
-    console.error('❌ Error marking messages as read:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to mark messages as read',
-      context: 'message/markMessagesAsReadController',
-    });
-  }
-};
-
-// GET /api/messages/inbox - Get seller's inbox (legacy contract)
-export const getSellerInboxController = async (req: any, res: Response): Promise<void> => {
-  try {
-    const userId = req.user?.student_id;
-    if (!userId) {
-      res.status(401).json({ error: 'Unauthorized: No user ID found in token' });
-      return;
-    }
-
-    const inbox = await getSellerInbox(String(userId));
     res.status(200).json({
       success: true,
       count: inbox.length,
-      inbox,
+      inbox
     });
-  } catch (err: any) {
-    console.error('❌ Error fetching inbox:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to fetch inbox',
-      context: 'message/getSellerInboxController',
-    });
-  }
-};
-
-// GET /api/messages/:otherUserId - Get messages between two users
-export const getMessages = async (req: any, res: Response): Promise<void> => {
-  try {
-    const studentId = req.user?.student_id;
-    const { otherUserId } = req.params;
-    const { limit = 50, offset = 0 } = req.query;
-
-    if (!studentId) {
-      res.status(401).json({ error: 'Authentication required' });
-      return;
-    }
-
-    const result = await pool.query(
-      `SELECT m.*, 
-              s.first_name as sender_first_name, s.last_name as sender_last_name
-       FROM messages m
-       JOIN students s ON m.sender_id = s.student_id
-       WHERE (m.sender_id = $1 AND m.receiver_id = $2)
-          OR (m.sender_id = $2 AND m.receiver_id = $1)
-       ORDER BY m.created_at DESC
-       LIMIT $3 OFFSET $4`,
-      [studentId, otherUserId, Number(limit), Number(offset)]
-    );
-
-    // Mark messages as read
-    await pool.query(
-      `UPDATE messages SET is_read = true
-       WHERE sender_id = $2 AND receiver_id = $1 AND is_read = false`,
-      [studentId, otherUserId]
-    );
-
-    res.json({
-      success: true,
-      messages: result.rows.reverse()
-    });
-  } catch (err: any) {
-    console.error('❌ Get Messages Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to fetch messages',
-      context: 'message/getMessages',
+  } catch (error) {
+    console.error('❌ Error fetching inbox:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch inbox',
+      message: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 };
 
-// POST /api/messages/:otherUserId - Send a message
-export const sendMessage = async (req: any, res: Response): Promise<void> => {
-
+// POST /api/messages/mark-read/:productId - Mark messages as read for a product
+export const markMessagesAsReadController = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const studentId = req.user?.student_id;
-    const { otherUserId } = req.params;
-    const { content } = req.body;
+    const userId = req.user?.id;
+    const { productId } = req.params;
 
-    if (!studentId) {
-      res.status(401).json({ error: 'Authentication required' });
-      return;
-    }
-
-    if (!content || content.trim().length === 0) {
-      res.status(400).json({ error: 'Message content is required' });
-      return;
-    }
-
-    if (otherUserId === studentId) {
-      res.status(400).json({ error: 'Cannot send message to yourself' });
-      return;
-    }
-
-    // Check if receiver exists
-    const receiverResult = await pool.query(
-      'SELECT student_id FROM students WHERE student_id = $1',
-      [otherUserId]
-    );
-
-    if (receiverResult.rows.length === 0) {
-      res.status(404).json({ error: 'Receiver not found' });
-      return;
-    }
-
-    const result = await pool.query(
-      `INSERT INTO messages (sender_id, receiver_id, content)
-       VALUES ($1, $2, $3)
-       RETURNING *`,
-      [studentId, otherUserId, content.trim()]
-    );
-
-    // Send notification to receiver
-    try {
-      await notificationService.createAndSend({
-        user_id: otherUserId,
-        type: 'message',
-        title: 'New Message',
-        message: content.trim(),
-        data: { sender_id: studentId },
-        priority: 'medium',
-        delivery_methods: ['push'],
+    if (!userId) {
+      res.status(401).json({
+        success: false,
+        error: 'Unauthorized: No user ID found in token'
       });
-    } catch (notifyError) {
-      console.warn('Failed to send message notification:', notifyError);
-    }
-
-    res.status(201).json({
-      success: true,
-      message: result.rows[0]
-    });
-  } catch (err: any) {
-    console.error('❌ Send Message Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to send message',
-      context: 'message/sendMessage',
-    });
-  }
-};
-
-// GET /api/messages/unread-count - Get unread message count
-export const getUnreadCount = async (req: any, res: Response): Promise<void> => {
-  try {
-    const studentId = req.user?.student_id;
-
-    if (!studentId) {
-      res.status(401).json({ error: 'Authentication required' });
       return;
     }
 
-    const result = await pool.query(
-      'SELECT COUNT(*) as count FROM messages WHERE receiver_id = $1 AND is_read = false',
-      [studentId]
-    );
-
-    res.json({
-      success: true,
-      unread_count: parseInt(result.rows[0].count)
-    });
-  } catch (err: any) {
-    console.error('❌ Get Unread Count Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to fetch unread count',
-      context: 'message/getUnreadCount',
-    });
-  }
-};
-
-// DELETE /api/messages/:messageId - Delete a message
-export const deleteMessage = async (req: any, res: Response): Promise<void> => {
-  try {
-    const studentId = req.user?.student_id;
-    const { messageId } = req.params;
-
-    if (!studentId) {
-      res.status(401).json({ error: 'Authentication required' });
+    const productIdNum = parseInt(productId, 10);
+    if (isNaN(productIdNum)) {
+      res.status(400).json({
+        success: false,
+        error: 'Invalid product ID'
+      });
       return;
     }
 
-    const result = await pool.query(
-      'DELETE FROM messages WHERE id = $1 AND sender_id = $2 RETURNING *',
-      [messageId, studentId]
-    );
+    // Mark messages as read using the imported function
+    await markMessagesAsRead(productIdNum, userId);
 
-    if (result.rows.length === 0) {
-      res.status(404).json({ error: 'Message not found or not authorized to delete' });
-      return;
-    }
-
-    res.json({
+    res.status(200).json({
       success: true,
-      message: 'Message deleted successfully'
+      message: 'Messages marked as read'
     });
-  } catch (err: any) {
-    console.error('❌ Delete Message Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to delete message',
-      context: 'message/deleteMessage',
+  } catch (error) {
+    console.error('❌ Error marking messages as read:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to mark messages as read',
+      message: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 };

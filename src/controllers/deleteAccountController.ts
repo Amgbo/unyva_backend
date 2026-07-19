@@ -1,6 +1,5 @@
 import { Request, Response } from 'express';
 import { createDeleteAccountRequest, getAllDeleteAccountRequests, updateDeleteAccountRequestStatus } from '../models/deleteAccountModel.js';
-import { handleControllerError } from '../utils/apiError.js';
 
 export const submitDeleteAccountRequest = async (req: Request, res: Response) => {
   try {
@@ -25,10 +24,9 @@ export const submitDeleteAccountRequest = async (req: Request, res: Response) =>
 
   } catch (error) {
     console.error('Error submitting delete account request:', error);
-    handleControllerError(res, error, {
-      statusCode: 500,
-      publicError: 'Failed to submit request. Please try again or contact support.',
-      context: 'deleteAccount/submitDeleteAccountRequest',
+    res.status(500).json({
+      success: false,
+      message: 'Failed to submit request. Please try again or contact support.'
     });
   }
 };

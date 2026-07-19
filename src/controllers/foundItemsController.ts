@@ -3,7 +3,6 @@ import { pool } from '../db.js';
 import { notificationService } from '../services/notificationService.js';
 import imagekit, { shouldUseImageKit } from '../config/imagekit.js';
 import { getLocalUrl } from '../config/multer.js';
-import { handleControllerError } from '../utils/apiError.js';
 
 // Categories for found items
 export const FOUND_ITEM_CATEGORIES = [
@@ -272,10 +271,9 @@ export const getFoundItems = async (req: Request, res: Response): Promise<void> 
     });
   } catch (err: any) {
     console.error('❌ Get Found Items Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to fetch found items',
-      context: 'foundItems/getFoundItems',
+    res.status(500).json({
+      error: 'Failed to fetch found items',
+      message: err.message
     });
   }
 };
@@ -318,10 +316,9 @@ export const getFoundItemById = async (req: Request, res: Response): Promise<voi
     });
   } catch (err: any) {
     console.error('❌ Get Found Item By ID Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to fetch found item',
-      context: 'foundItems/getFoundItemById',
+    res.status(500).json({
+      error: 'Failed to fetch found item',
+      message: err.message
     });
   }
 };
@@ -535,10 +532,9 @@ export const addFoundItem = async (req: any, res: Response): Promise<void> => {
     });
   } catch (err: any) {
     console.error('❌ Add Found Item Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to add found item',
-      context: 'foundItems/addFoundItem',
+    res.status(500).json({
+      error: 'Failed to add found item',
+      message: err.message
     });
   }
 };
@@ -717,10 +713,9 @@ export const updateFoundItem = async (req: any, res: Response): Promise<void> =>
     });
   } catch (err: any) {
     console.error('❌ Update Found Item Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to update found item',
-      context: 'foundItems/updateFoundItem',
+    res.status(500).json({
+      error: 'Failed to update found item',
+      message: err.message
     });
   }
 };
@@ -763,10 +758,9 @@ export const deleteFoundItem = async (req: any, res: Response): Promise<void> =>
     });
   } catch (err: any) {
     console.error('❌ Delete Found Item Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to delete found item',
-      context: 'foundItems/deleteFoundItem',
+    res.status(500).json({
+      error: 'Failed to delete found item',
+      message: err.message
     });
   }
 };
@@ -805,10 +799,9 @@ export const getMyFoundItems = async (req: any, res: Response): Promise<void> =>
     });
   } catch (err: any) {
     console.error('❌ Get My Found Items Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to fetch your found items',
-      context: 'foundItems/getMyFoundItems',
+    res.status(500).json({
+      error: 'Failed to fetch your found items',
+      message: err.message
     });
   }
 };
@@ -890,10 +883,9 @@ export const claimFoundItem = async (req: any, res: Response): Promise<void> => 
     });
   } catch (err: any) {
     console.error('❌ Claim Found Item Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to claim found item',
-      context: 'foundItems/claimFoundItem',
+    res.status(500).json({
+      error: 'Failed to claim found item',
+      message: err.message
     });
   }
 };
@@ -975,10 +967,9 @@ export const resolveFoundItem = async (req: any, res: Response): Promise<void> =
     });
   } catch (err: any) {
     console.error('❌ Resolve Found Item Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to resolve found item',
-      context: 'foundItems/resolveFoundItem',
+    res.status(500).json({
+      error: 'Failed to resolve found item',
+      message: err.message
     });
   }
 };

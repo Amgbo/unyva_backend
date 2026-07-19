@@ -17,7 +17,6 @@ import {
 import { aggregationQueue } from '../services/aggregationQueue.js';
 import { aggregationService } from '../services/aggregationService.js';
 import { resolveLocation } from '../services/locationResolutionService.js';
-import { handleControllerError } from '../utils/apiError.js';
 
 // Ingestion options: when true, the measurement upload path resolves each
 // GPS point to a PostGIS building/room and stores the resolved IDs on the
@@ -63,7 +62,7 @@ export const getPublicConfig = async (_req: Request, res: Response): Promise<voi
   try {
     const configs = await ConfigurationModel.getAll(true);
     const publicConfig: Record<string, any> = {};
-
+    
     for (const config of configs) {
       publicConfig[config.config_key] = config.config_value.value;
     }
@@ -74,10 +73,10 @@ export const getPublicConfig = async (_req: Request, res: Response): Promise<voi
     });
   } catch (err: any) {
     console.error('❌ Get Public Config Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to fetch configuration',
-      context: 'hotspot/getPublicConfig',
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch configuration',
+      message: err.message
     });
   }
 };
@@ -88,17 +87,17 @@ export const getPublicConfig = async (_req: Request, res: Response): Promise<voi
 export const getCampuses = async (_req: Request, res: Response): Promise<void> => {
   try {
     const campuses = await CampusModel.findAll(true);
-
+    
     res.status(200).json({
       success: true,
       campuses
     });
   } catch (err: any) {
     console.error('❌ Get Campuses Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to fetch campuses',
-      context: 'hotspot/getCampuses',
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch campuses',
+      message: err.message
     });
   }
 };
@@ -108,7 +107,7 @@ export const getCampusByCode = async (req: Request, res: Response): Promise<void
   try {
     const { code } = req.params;
     const campus = await CampusModel.findByCodeOrId(normalizeIdentifier(code));
-
+    
     if (!campus) {
       res.status(404).json({
         success: false,
@@ -123,10 +122,10 @@ export const getCampusByCode = async (req: Request, res: Response): Promise<void
     });
   } catch (err: any) {
     console.error('❌ Get Campus By Code Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to fetch campus',
-      context: 'hotspot/getCampusByCode',
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch campus',
+      message: err.message
     });
   }
 };
@@ -138,7 +137,7 @@ export const getBuildingsByCampus = async (req: Request, res: Response): Promise
   try {
     const { campusCode } = req.params;
     const campus = await CampusModel.findByCodeOrId(normalizeIdentifier(campusCode));
-
+    
     if (!campus || !campus.id) {
       res.status(404).json({
         success: false,
@@ -148,17 +147,17 @@ export const getBuildingsByCampus = async (req: Request, res: Response): Promise
     }
 
     const buildings = await BuildingModel.findByCampus(campus.id, true);
-
+    
     res.status(200).json({
       success: true,
       buildings
     });
   } catch (err: any) {
     console.error('❌ Get Buildings By Campus Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to fetch buildings',
-      context: 'hotspot/getBuildingsByCampus',
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch buildings',
+      message: err.message
     });
   }
 };
@@ -168,17 +167,17 @@ export const getFloorsByBuilding = async (req: Request, res: Response): Promise<
   try {
     const { buildingId } = req.params;
     const floors = await FloorModel.findByBuilding(parseInt(buildingId), true);
-
+    
     res.status(200).json({
       success: true,
       floors
     });
   } catch (err: any) {
     console.error('❌ Get Floors By Building Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to fetch floors',
-      context: 'hotspot/getFloorsByBuilding',
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch floors',
+      message: err.message
     });
   }
 };
@@ -188,17 +187,17 @@ export const getRoomsByFloor = async (req: Request, res: Response): Promise<void
   try {
     const { floorId } = req.params;
     const rooms = await RoomModel.findByFloor(parseInt(floorId), true);
-
+    
     res.status(200).json({
       success: true,
       rooms
     });
   } catch (err: any) {
     console.error('❌ Get Rooms By Floor Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to fetch rooms',
-      context: 'hotspot/getRoomsByFloor',
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch rooms',
+      message: err.message
     });
   }
 };
@@ -209,17 +208,17 @@ export const getRoomsByFloor = async (req: Request, res: Response): Promise<void
 export const getCarriers = async (_req: Request, res: Response): Promise<void> => {
   try {
     const carriers = await CarrierModel.findAll(true);
-
+    
     res.status(200).json({
       success: true,
       carriers
     });
   } catch (err: any) {
     console.error('❌ Get Carriers Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to fetch carriers',
-      context: 'hotspot/getCarriers',
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch carriers',
+      message: err.message
     });
   }
 };
@@ -230,7 +229,7 @@ export const getCarriers = async (_req: Request, res: Response): Promise<void> =
 export const submitMeasurements = async (req: any, res: Response): Promise<void> => {
   try {
     const studentId = req.user?.student_id;
-
+    
     if (!studentId) {
       res.status(401).json({
         success: false,
@@ -401,7 +400,7 @@ export const submitMeasurements = async (req: any, res: Response): Promise<void>
       });
     }
 
-
+    
     res.status(201).json({
       success: true,
       message: `Successfully uploaded ${createdMeasurements.length} measurements`,
@@ -410,10 +409,10 @@ export const submitMeasurements = async (req: any, res: Response): Promise<void>
     });
   } catch (err: any) {
     console.error('❌ Submit Measurements Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to submit measurements',
-      context: 'hotspot/submitMeasurements',
+    res.status(500).json({
+      success: false,
+      error: 'Failed to submit measurements',
+      message: err.message
     });
   }
 };
@@ -422,7 +421,7 @@ export const submitMeasurements = async (req: any, res: Response): Promise<void>
 export const getMeasurements = async (req: any, res: Response): Promise<void> => {
   try {
     const studentId = req.user?.student_id;
-
+    
     if (!studentId) {
       res.status(401).json({
         success: false,
@@ -447,10 +446,10 @@ export const getMeasurements = async (req: any, res: Response): Promise<void> =>
     });
   } catch (err: any) {
     console.error('❌ Get Measurements Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to fetch measurements',
-      context: 'hotspot/getMeasurements',
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch measurements',
+      message: err.message
     });
   }
 };
@@ -461,7 +460,7 @@ export const getMeasurements = async (req: any, res: Response): Promise<void> =>
 export const submitSpeedTest = async (req: any, res: Response): Promise<void> => {
   try {
     const studentId = req.user?.student_id;
-
+    
     if (!studentId) {
       res.status(401).json({
         success: false,
@@ -483,7 +482,7 @@ export const submitSpeedTest = async (req: any, res: Response): Promise<void> =>
 
     // Validate that the measurement exists and belongs to the user
     const measurement = await MeasurementModel.findById(measurement_id);
-
+    
     if (!measurement) {
       res.status(404).json({
         success: false,
@@ -502,7 +501,7 @@ export const submitSpeedTest = async (req: any, res: Response): Promise<void> =>
 
     // Check if speed test already exists for this measurement
     const existingSpeedTest = await SpeedTestModel.findByMeasurement(measurement_id);
-
+    
     if (existingSpeedTest) {
       res.status(409).json({
         success: false,
@@ -542,10 +541,10 @@ export const submitSpeedTest = async (req: any, res: Response): Promise<void> =>
     });
   } catch (err: any) {
     console.error('❌ Submit Speed Test Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to submit speed test',
-      context: 'hotspot/submitSpeedTest',
+    res.status(500).json({
+      success: false,
+      error: 'Failed to submit speed test',
+      message: err.message
     });
   }
 };
@@ -569,10 +568,10 @@ export const getBuildingCoverage = async (req: Request, res: Response): Promise<
     });
   } catch (err: any) {
     console.error('❌ Get Building Coverage Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to fetch building coverage',
-      context: 'hotspot/getBuildingCoverage',
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch building coverage',
+      message: err.message
     });
   }
 };
@@ -594,10 +593,10 @@ export const getRoomCoverage = async (req: Request, res: Response): Promise<void
     });
   } catch (err: any) {
     console.error('❌ Get Room Coverage Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to fetch room coverage',
-      context: 'hotspot/getRoomCoverage',
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch room coverage',
+      message: err.message
     });
   }
 };
@@ -645,10 +644,10 @@ export const getHeatmapTiles = async (req: Request, res: Response): Promise<void
     });
   } catch (err: any) {
     console.error('❌ Get Heatmap Tiles Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to fetch heatmap tiles',
-      context: 'hotspot/getHeatmapTiles',
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch heatmap tiles',
+      message: err.message
     });
   }
 };
@@ -720,10 +719,10 @@ export const getNearbyCoverageSummaries = async (req: Request, res: Response): P
     });
   } catch (err: any) {
     console.error('❌ Get Nearby Coverage Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to fetch nearby coverage summaries',
-      context: 'hotspot/getNearbyCoverageSummaries',
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch nearby coverage summaries',
+      message: err.message
     });
   }
 };
@@ -809,10 +808,10 @@ export const getBuildingAnalytics = async (req: Request, res: Response): Promise
     });
   } catch (err: any) {
     console.error('❌ Get Building Analytics Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to fetch building analytics',
-      context: 'hotspot/getBuildingAnalytics',
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch building analytics',
+      message: err.message
     });
   }
 };

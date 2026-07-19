@@ -1,292 +1,333 @@
+// src/controllers/categoryController.ts
 import { Request, Response } from 'express';
-import { pool } from '../db.js';
-import { handleControllerError } from '../utils/apiError.js';
+import {
+  getProductCategories,
+  getServiceCategories,
+  getCategoryStats,
+  getProductCategoryByName,
+  getServiceCategoryByName,
+  getPopularCategories,
+  ProductCategory,
+  ServiceCategory,
+  CategoryStats
+} from '../models/categoryModel.js';
 
-// GET /api/categories - Get all categories
-export const getCategories = async (_req: Request, res: Response): Promise<void> => {
+// GET: All product categories
+export const getAllProductCategories = async (req: Request, res: Response): Promise<void> => {
   try {
-    console.log('📂 Fetching categories...');
+    const categories = await getProductCategories();
 
-    const result = await pool.query(
-      'SELECT id, name, description, icon, created_at FROM categories ORDER BY name ASC'
-    );
-
-    console.log('✅ Categories fetched successfully');
     res.status(200).json({
       success: true,
-      categories: result.rows
+      count: categories.length,
+      categories: categories,
+      metadata: {
+        type: 'products',
+        total_categories: categories.length,
+        active_categories: categories.filter(c => c.is_active).length
+      }
     });
-  } catch (err: any) {
-    console.error('❌ Get Categories Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to fetch categories',
-      context: 'category/getCategories',
+  } catch (error) {
+    console.error('❌ Error fetching product categories:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch product categories',
+      message: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 };
 
-// GET /api/categories/:id - Get category by ID
-export const getCategoryById = async (req: Request, res: Response): Promise<void> => {
+// GET: All service categories
+export const getAllServiceCategories = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { id } = req.params;
-    console.log('📂 Fetching category by ID:', id);
+    const categories = await getServiceCategories();
 
-    const result = await pool.query(
-      'SELECT id, name, description, icon, created_at FROM categories WHERE id = $1',
-      [id]
-    );
-
-    if (result.rows.length === 0) {
-      res.status(404).json({
-        error: 'Category not found'
-      });
-      return;
-    }
-
-    console.log('✅ Category fetched successfully');
     res.status(200).json({
       success: true,
-      category: result.rows[0]
+      count: categories.length,
+      categories: categories,
+      metadata: {
+        type: 'services',
+        total_categories: categories.length,
+        active_categories: categories.filter(c => c.is_active).length
+      }
     });
-  } catch (err: any) {
-    console.error('❌ Get Category By ID Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to fetch category',
-      context: 'category/getCategoryById',
+  } catch (error) {
+    console.error('❌ Error fetching service categories:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch service categories',
+      message: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 };
 
-// POST /api/categories - Add new category (Admin only)
-export const addCategory = async (req: any, res: Response): Promise<void> => {
+// GET: All categories (products and services combined)
+export const getAllCategories = async (req: Request, res: Response): Promise<void> => {
   try {
-    console.log('📂 Adding new category...');
+    const [productCategories, serviceCategories] = await Promise.all([
+      getProductCategories(),
+      getServiceCategories()
+    ]);
 
-    const { name, description, icon } = req.body;
-    const studentId = req.user?.student_id;
+    const allCategories = [
+      ...productCategories.map(cat => ({ ...cat, type: 'products' })),
+      ...serviceCategories.map(cat => ({ ...cat, type: 'services' }))
+    ];
 
-    // Validate required fields
-    if (!name) {
+    res.status(200).json({
+      success: true,
+      count: allCategories.length,
+      categories: allCategories,
+      metadata: {
+        product_categories: productCategories.length,
+        service_categories: serviceCategories.length,
+        total_categories: allCategories.length
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error fetching all categories:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch categories',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+};
+
+// GET: Category statistics
+export const getCategoriesStats = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const stats = await getCategoryStats();
+
+    res.status(200).json({
+      success: true,
+      count: stats.length,
+      stats: stats,
+      metadata: {
+        total_categories: stats.length,
+        total_products: stats.reduce((sum, stat) => sum + Number(stat.product_count), 0),
+        total_services: stats.reduce((sum, stat) => sum + Number(stat.service_count), 0),
+        total_listings: stats.reduce((sum, stat) => sum + Number(stat.total_count), 0)
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error fetching category statistics:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch category statistics',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+};
+
+// GET: Popular categories
+export const getPopularCategoriesList = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 10;
+
+    if (isNaN(limit) || limit < 1 || limit > 50) {
       res.status(400).json({
-        error: 'Category name is required'
+        success: false,
+        error: 'Invalid limit. Must be between 1 and 50.'
       });
       return;
     }
 
-    // Check if user is admin (student_id '22243185')
-    if (studentId !== '22243185') {
-      console.log('❌ Access denied: Non-admin user attempted to add category');
-      res.status(403).json({
-        error: 'Access denied. Admin privileges required.'
-      });
-      return;
-    }
+    const popularCategories = await getPopularCategories(limit);
 
-    console.log('✅ Admin access verified for student:', studentId);
-
-    // Check if category already exists
-    const existingResult = await pool.query(
-      'SELECT id FROM categories WHERE name = $1',
-      [name]
-    );
-
-    if (existingResult.rows.length > 0) {
-      res.status(409).json({
-        error: 'Category already exists'
-      });
-      return;
-    }
-
-    // Insert into database
-    const result = await pool.query(
-      'INSERT INTO categories (name, description, icon) VALUES ($1, $2, $3) RETURNING *',
-      [name, description || null, icon || null]
-    );
-
-    console.log('✅ Category added successfully');
-    res.status(201).json({
+    res.status(200).json({
       success: true,
-      message: 'Category added successfully',
-      category: result.rows[0]
+      count: popularCategories.length,
+      categories: popularCategories,
+      metadata: {
+        limit: limit,
+        total_products: popularCategories.reduce((sum, cat) => sum + Number(cat.product_count), 0),
+        total_services: popularCategories.reduce((sum, cat) => sum + Number(cat.service_count), 0),
+        total_listings: popularCategories.reduce((sum, cat) => sum + Number(cat.total_count), 0)
+      }
     });
-  } catch (err: any) {
-    console.error('❌ Add Category Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to add category',
-      context: 'category/addCategory',
+  } catch (error) {
+    console.error('❌ Error fetching popular categories:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch popular categories',
+      message: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 };
 
-// PUT /api/categories/:id - Update category (Admin only)
-export const updateCategory = async (req: any, res: Response): Promise<void> => {
+// GET: Single product category by name
+export const getProductCategory = async (req: Request<{ name: string }>, res: Response): Promise<void> => {
   try {
-    const { id } = req.params;
-    const { name, description, icon } = req.body;
-    const studentId = req.user?.student_id;
+    const { name } = req.params;
+    const category = await getProductCategoryByName(name);
 
-    console.log('📂 Updating category:', id);
-
-    // Check if user is admin (student_id '22243185')
-    if (studentId !== '22243185') {
-      console.log('❌ Access denied: Non-admin user attempted to update category');
-      res.status(403).json({
-        error: 'Access denied. Admin privileges required.'
-      });
-      return;
-    }
-
-    // Check if category exists
-    const existingResult = await pool.query(
-      'SELECT id FROM categories WHERE id = $1',
-      [id]
-    );
-
-    if (existingResult.rows.length === 0) {
+    if (!category) {
       res.status(404).json({
-        error: 'Category not found'
+        success: false,
+        error: 'Product category not found'
       });
       return;
     }
 
-    // Build dynamic update query
-    const updates: string[] = [];
-    const values: any[] = [];
-    let paramIndex = 1;
+    res.status(200).json({
+      success: true,
+      category: category
+    });
+  } catch (error) {
+    console.error('❌ Error fetching product category:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch product category',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+};
 
-    if (name !== undefined) {
-      updates.push(`name = $${paramIndex++}`);
-      values.push(name);
-    }
-    if (description !== undefined) {
-      updates.push(`description = $${paramIndex++}`);
-      values.push(description);
-    }
-    if (icon !== undefined) {
-      updates.push(`icon = $${paramIndex++}`);
-      values.push(icon);
+// GET: Single service category by name
+export const getServiceCategory = async (req: Request<{ name: string }>, res: Response): Promise<void> => {
+  try {
+    const { name } = req.params;
+    const category = await getServiceCategoryByName(name);
+
+    if (!category) {
+      res.status(404).json({
+        success: false,
+        error: 'Service category not found'
+      });
+      return;
     }
 
-    if (updates.length === 0) {
+    res.status(200).json({
+      success: true,
+      category: category
+    });
+  } catch (error) {
+    console.error('❌ Error fetching service category:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch service category',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+};
+
+// GET: Categories for dropdown/select (simplified format)
+export const getCategoriesForDropdown = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const type = req.query.type as string || 'all'; // 'products', 'services', or 'all'
+
+    let categories: (ProductCategory | ServiceCategory)[] = [];
+
+    if (type === 'products' || type === 'all') {
+      const productCategories = await getProductCategories();
+      categories = [...categories, ...productCategories.map(cat => ({ ...cat, type: 'products' }))];
+    }
+
+    if (type === 'services' || type === 'all') {
+      const serviceCategories = await getServiceCategories();
+      categories = [...categories, ...serviceCategories.map(cat => ({ ...cat, type: 'services' }))];
+    }
+
+    // Transform to dropdown format
+    const dropdownCategories = categories.map(cat => ({
+      value: cat.name,
+      label: cat.display_name,
+      description: cat.description,
+      icon: cat.icon,
+      color: cat.color,
+      type: (cat as any).type || 'products'
+    }));
+
+    res.status(200).json({
+      success: true,
+      count: dropdownCategories.length,
+      categories: dropdownCategories,
+      metadata: {
+        type: type,
+        total_categories: dropdownCategories.length
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error fetching categories for dropdown:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch categories for dropdown',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+};
+
+// GET: Category suggestions based on query
+export const getCategorySuggestions = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const query = req.query.q as string;
+    const type = req.query.type as string || 'all';
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 5;
+
+    if (!query || query.length < 1) {
       res.status(400).json({
-        error: 'No fields to update'
+        success: false,
+        error: 'Query parameter is required and must be at least 1 character'
       });
       return;
     }
 
-    values.push(id);
+    if (isNaN(limit) || limit < 1 || limit > 20) {
+      res.status(400).json({
+        success: false,
+        error: 'Invalid limit. Must be between 1 and 20.'
+      });
+      return;
+    }
 
-    const query = `
-      UPDATE categories 
-      SET ${updates.join(', ')}
-      WHERE id = $${paramIndex}
-      RETURNING *
-    `;
+    let categories: (ProductCategory | ServiceCategory)[] = [];
 
-    const result = await pool.query(query, values);
+    if (type === 'products' || type === 'all') {
+      const productCategories = await getProductCategories();
+      categories = [...categories, ...productCategories];
+    }
 
-    console.log('✅ Category updated successfully');
+    if (type === 'services' || type === 'all') {
+      const serviceCategories = await getServiceCategories();
+      categories = [...categories, ...serviceCategories];
+    }
+
+    // Filter categories based on query
+    const filteredCategories = categories.filter(cat =>
+      cat.name.toLowerCase().includes(query.toLowerCase()) ||
+      cat.display_name.toLowerCase().includes(query.toLowerCase()) ||
+      cat.description.toLowerCase().includes(query.toLowerCase())
+    ).slice(0, limit);
+
+    // Transform to suggestion format
+    const suggestions = filteredCategories.map(cat => ({
+      value: cat.name,
+      label: cat.display_name,
+      description: cat.description,
+      icon: cat.icon,
+      color: cat.color,
+      type: type === 'all' ? (categories.indexOf(cat) < 6 ? 'products' : 'services') : type
+    }));
+
     res.status(200).json({
       success: true,
-      message: 'Category updated successfully',
-      category: result.rows[0]
+      count: suggestions.length,
+      query: query,
+      suggestions: suggestions,
+      metadata: {
+        type: type,
+        limit: limit,
+        total_matches: suggestions.length
+      }
     });
-  } catch (err: any) {
-    console.error('❌ Update Category Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to update category',
-      context: 'category/updateCategory',
+  } catch (error) {
+    console.error('❌ Error fetching category suggestions:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch category suggestions',
+      message: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 };
-
-// DELETE /api/categories/:id - Delete category (Admin only)
-export const deleteCategory = async (req: any, res: Response): Promise<void> => {
-  try {
-    const { id } = req.params;
-    const studentId = req.user?.student_id;
-
-    console.log('🗑️ Deleting category:', id);
-
-    // Check if user is admin (student_id '22243185')
-    if (studentId !== '22243185') {
-      console.log('❌ Access denied: Non-admin user attempted to delete category');
-      res.status(403).json({
-        error: 'Access denied. Admin privileges required.'
-      });
-      return;
-    }
-
-    // Check if category exists
-    const existingResult = await pool.query(
-      'SELECT id FROM categories WHERE id = $1',
-      [id]
-    );
-
-    if (existingResult.rows.length === 0) {
-      res.status(404).json({
-        error: 'Category not found'
-      });
-      return;
-    }
-
-    // Check if category is in use by products
-    const productsResult = await pool.query(
-      'SELECT COUNT(*) as count FROM products WHERE category = $1',
-      [existingResult.rows[0].name]
-    );
-
-    if (parseInt(productsResult.rows[0].count) > 0) {
-      res.status(409).json({
-        error: 'Cannot delete category that is in use by products'
-      });
-      return;
-    }
-
-    // Delete from database
-    await pool.query('DELETE FROM categories WHERE id = $1', [id]);
-
-    console.log('✅ Category deleted successfully');
-    res.status(200).json({
-      success: true,
-      message: 'Category deleted successfully'
-    });
-  } catch (err: any) {
-    console.error('❌ Delete Category Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to delete category',
-      context: 'category/deleteCategory',
-    });
-  }
-};
-
-// ---------------------------------------------------------------------------
-// Backward-compatible exports (older routes expect these named exports)
-// ---------------------------------------------------------------------------
-
-// Older routes expected these “getAll*” names.
-export const getAllProductCategories = getCategories;
-export const getAllServiceCategories = getCategories;
-
-// Aliases used by older code.
-export const getAllCategories = getCategories;
-
-// NOTE: do NOT re-export `getCategories` here; it already exists above.
-
-
-
-// Stats/popular/suggestions endpoints aren’t implemented in this controller yet.
-// For compile-time compatibility, map them to existing categories listing.
-export const getCategoriesStats = getCategories;
-export const getPopularCategoriesList = getCategories;
-export const getProductCategory = getCategoryById;
-export const getServiceCategory = getCategoryById;
-export const getCategoriesForDropdown = getCategories;
-export const getCategorySuggestions = getCategories;
-
-

@@ -13,7 +13,6 @@ import {
   UserInteraction,
   getTrendingItems
 } from '../models/userBehaviorModel.js';
-import { handleControllerError } from '../utils/apiError.js';
 
 export const trackView = async (req: AuthRequest, res: Response) => {
   try {
@@ -62,10 +61,9 @@ export const trackView = async (req: AuthRequest, res: Response) => {
     });
   } catch (error) {
     console.error('Error tracking view:', error);
-    handleControllerError(res, error, {
-      statusCode: 500,
-      publicError: 'Failed to track view',
-      context: 'behavior/trackView',
+    res.status(500).json({
+      success: false,
+      message: 'Failed to track view'
     });
   }
 };
@@ -99,10 +97,9 @@ export const trackSearch = async (req: AuthRequest, res: Response) => {
     });
   } catch (error) {
     console.error('Error tracking search:', error);
-    handleControllerError(res, error, {
-      statusCode: 500,
-      publicError: 'Failed to track search',
-      context: 'behavior/trackSearch',
+    res.status(500).json({
+      success: false,
+      message: 'Failed to track search'
     });
   }
 };
@@ -158,10 +155,9 @@ export const trackInteraction = async (req: AuthRequest, res: Response) => {
     });
   } catch (error) {
     console.error('Error tracking interaction:', error);
-    handleControllerError(res, error, {
-      statusCode: 500,
-      publicError: 'Failed to track interaction',
-      context: 'behavior/trackInteraction',
+    res.status(500).json({
+      success: false,
+      message: 'Failed to track interaction'
     });
   }
 };
@@ -188,10 +184,9 @@ export const getViewHistory = async (req: AuthRequest, res: Response) => {
     });
   } catch (error) {
     console.error('Error getting view history:', error);
-    handleControllerError(res, error, {
-      statusCode: 500,
-      publicError: 'Failed to get view history',
-      context: 'behavior/getViewHistory',
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get view history'
     });
   }
 };
@@ -218,10 +213,9 @@ export const getSearchHistory = async (req: AuthRequest, res: Response) => {
     });
   } catch (error) {
     console.error('Error getting search history:', error);
-    handleControllerError(res, error, {
-      statusCode: 500,
-      publicError: 'Failed to get search history',
-      context: 'behavior/getSearchHistory',
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get search history'
     });
   }
 };
@@ -248,10 +242,9 @@ export const getPurchaseHistory = async (req: AuthRequest, res: Response) => {
     });
   } catch (error) {
     console.error('Error getting purchase history:', error);
-    handleControllerError(res, error, {
-      statusCode: 500,
-      publicError: 'Failed to get purchase history',
-      context: 'behavior/getPurchaseHistory',
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get purchase history'
     });
   }
 };
@@ -279,10 +272,9 @@ export const getInteractions = async (req: AuthRequest, res: Response) => {
     });
   } catch (error) {
     console.error('Error getting interactions:', error);
-    handleControllerError(res, error, {
-      statusCode: 500,
-      publicError: 'Failed to get interactions',
-      context: 'behavior/getInteractions',
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get interactions'
     });
   }
 };

@@ -1,136 +1,546 @@
+ import bcrypt from 'bcrypt';
+import crypto from 'crypto';
 import { Request, Response } from 'express';
-import { pool } from '../db.js';
-import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import { handleControllerError } from '../utils/apiError.js';
+import nodemailer from 'nodemailer';
+import { pool } from '../db.js';
+import {
+  registerStep1Schema,
+  registerStep2Schema,
+} from '../validators/studentValidator.js';
+import { deliveryCodeManager } from '../utils/DeliveryCodeManager.js';
+import imagekit, { shouldUseImageKit } from '../config/imagekit.js';
+import { getLocalUrl, deleteLocalFile } from '../config/multer.js';
+import { isValidUniversityEmail, getAllUniversities } from '../models/universityModel.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+// Email transporter (Gmail) - Initialize only if credentials are provided
+let transporter: any = null;
 
-// POST /api/students/register - Register a new student
-export const registerStudent = async (req: Request, res: Response): Promise<void> => {
+if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+  try {
+    transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    });
+    console.log('📧 Email transporter initialized');
+  } catch (error) {
+    console.log('⚠️ Email transporter initialization failed:', error);
+    transporter = null;
+  }
+} else {
+  console.log('⚠️ Email credentials not provided, email functionality disabled');
+}
+
+// STEP 1: Validate Basic Info - NO DB INSERTION
+export const registerStep1 = async (req: Request, res: Response): Promise<void> => {
+  console.log('🔵 REGISTER STEP 1 REQUEST RECEIVED');
+  console.log('📦 Request body:', req.body);
+
+  const parsed = registerStep1Schema.safeParse(req.body);
+
+  if (!parsed.success) {
+    const fieldErrors = parsed.error.flatten().fieldErrors;
+    console.log('❌ Validation failed:', fieldErrors);
+
+    const errorMessages = Object.entries(fieldErrors)
+      .map(([field, errors]) => `${field}: ${errors.join(', ')}`)
+      .join(' | ');
+
+    res.status(400).json({
+      error: 'Validation failed',
+      details: fieldErrors,
+      message: errorMessages
+    });
+    return;
+  }
+
+  // Extract all fields including hall_of_residence and room_number
+  const {
+    student_id,
+    email,
+    first_name,
+    last_name,
+    phone,
+    gender,
+    date_of_birth,
+    hall_of_residence,  // CHANGED: from address to hall_of_residence
+    room_number = null, // NEW: Room number field
+    role = 'buyer_seller',
+    delivery_code = null,
+    university = null,
+    program = null,
+    graduation_year = null,
+  } = parsed.data;
+
+  // Validate university email domain if university is selected
+  if (university) {
+    const isValidEmail = await isValidUniversityEmail(email, university);
+    if (!isValidEmail) {
+      res.status(400).json({
+        error: 'Invalid email domain',
+        message: `Email must be from ${university} domain. Please use your university email address.`
+      });
+      return;
+    }
+  }
 
   try {
-    const { student_id, first_name, last_name, email, password, phone, university_id, hall_id, room_number } = req.body;
+    // Validate delivery code if role is 'delivery'
+    if (role === 'delivery') {
+      if (!delivery_code) {
+        res.status(400).json({ error: 'Delivery access code is required for delivery role' });
+        return;
+      }
 
-    if (!student_id || !first_name || !last_name || !email || !password) {
-      res.status(400).json({ error: 'Required fields missing' });
+      const validationResult = await deliveryCodeManager.validateCode(delivery_code);
+      if (!validationResult.isValid) {
+        res.status(400).json({ error: validationResult.message });
+        return;
+      }
+    }
+
+    // Check if student already exists (for validation only)
+    console.log('🔍 Checking if student exists...');
+    const exists = await pool.query(
+      'SELECT * FROM students WHERE email = $1 OR student_id = $2',
+      [email, student_id]
+    );
+
+    if (exists.rows.length > 0) {
+      console.log('⚠️ Student already exists with email:', email, 'or student_id:', student_id);
+      res.status(409).json({
+        error: 'Student with this email or student ID already exists.',
+        existing_student: {
+          email: exists.rows[0].email,
+          student_id: exists.rows[0].student_id
+        }
+      });
       return;
     }
 
-    // Check if student already exists
-    const existingResult = await pool.query(
-      'SELECT student_id FROM students WHERE student_id = $1 OR email = $2',
-      [student_id, email]
-    );
-
-    if (existingResult.rows.length > 0) {
-      res.status(409).json({ error: 'Student ID or email already registered' });
-      return;
+    console.log('✅ REGISTRATION STEP 1 VALIDATION COMPLETED SUCCESSFULLY');
+    console.log('👤 Student validated:', student_id);
+    console.log('🎯 Role:', role);
+    console.log('🏠 Hall of residence:', hall_of_residence);
+    if (room_number) console.log('🚪 Room number:', room_number);
+    if (role === 'delivery') {
+      console.log('🚚 Delivery code validated:', delivery_code);
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    const result = await pool.query(
-      `INSERT INTO students (student_id, first_name, last_name, email, password, phone, university_id, hall_id, room_number)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-       RETURNING student_id, first_name, last_name, email, phone, university_id, hall_id, room_number, created_at`,
-      [student_id, first_name, last_name, email, hashedPassword, phone || null, university_id || null, hall_id || null, room_number || null]
-    );
-
-    const token = jwt.sign(
-      { student_id: result.rows[0].student_id, email: result.rows[0].email },
-      JWT_SECRET,
-      { expiresIn: '7d' }
-    );
-
-    res.status(201).json({
+    // Return success response with validation info (NO DB INSERTION)
+    res.status(200).json({
       success: true,
-      message: 'Student registered successfully',
-      student: result.rows[0],
-      token
+      student_id: student_id,
+      message: 'Step 1 validated successfully. Proceed to Step 2.',
+      student: {
+        student_id: student_id,
+        email: email,
+        first_name: first_name,
+        last_name: last_name,
+        role: role,
+        university: university,
+        program: program
+      }
     });
   } catch (err: any) {
-    console.error('❌ Register Student Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to register student',
-      context: 'student/registerStudent',
+    console.error('❌ Step 1 Validation Error:', err);
+    console.error('Error details:', {
+      message: err.message,
+      code: err.code,
+      detail: err.detail,
+      table: err.table,
+      constraint: err.constraint
+    });
+
+    res.status(500).json({
+      error: 'Step 1 validation failed',
+      message: err.message,
+      code: err.code
     });
   }
 };
 
-// POST /api/students/login - Login a student
-export const loginStudent = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { student_id, password } = req.body;
+// COMPLETE REGISTRATION: Single INSERT with all data from Step 1 + Step 2
+export const completeRegistration = async (req: Request, res: Response): Promise<void> => {
+  console.log('🔵 COMPLETE REGISTRATION REQUEST RECEIVED');
+  console.log('📦 Request body:', req.body);
+  console.log('🖼 Files received:', req.files ? Object.keys(req.files) : 'No files');
 
-    if (!student_id || !password) {
-      res.status(400).json({ error: 'Student ID and password are required' });
+  if (req.files) {
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+    console.log('📸 Profile picture:', files['profile_picture']?.[0]?.filename || 'Not received');
+    console.log('🆔 ID card:', files['id_card']?.[0]?.filename || 'Not received');
+  }
+
+  const parsed = registerStep2Schema.safeParse(req.body);
+
+  if (!parsed.success) {
+    console.log('❌ Validation failed:', parsed.error.flatten().fieldErrors);
+    res.status(400).json({
+      error: 'Validation failed',
+      details: parsed.error.flatten().fieldErrors,
+    });
+    return;
+  }
+
+  const { password, confirmPassword } = parsed.data;
+
+  if (password !== confirmPassword) {
+    console.log('❌ Passwords do not match');
+    res.status(400).json({ error: 'Passwords do not match' });
+    return;
+  }
+
+  // Extract all Step 1 data from request body (should be sent from frontend)
+  const {
+    student_id,
+    email,
+    first_name,
+    last_name,
+    phone,
+    gender,
+    date_of_birth,
+    hall_of_residence,
+    room_number = null,
+    role = 'buyer_seller',
+    delivery_code = null,
+    university = null,
+    program = null,
+    graduation_year = null,
+  } = req.body;
+
+  if (!student_id || !email || !first_name || !last_name || !phone || !gender || !date_of_birth || !hall_of_residence) {
+    console.log('❌ Missing required fields from Step 1');
+    res.status(400).json({ error: 'Missing required registration data from Step 1.' });
+    return;
+  }
+
+  const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+  const profilePicFile = files?.['profile_picture']?.[0];
+  const idCardFile = files?.['id_card']?.[0];
+
+  // For testing purposes, make files optional
+  if (!profilePicFile || !idCardFile) {
+    console.log('⚠️ No files provided - this is allowed for testing');
+  }
+
+  try {
+    console.log('🔐 Hashing password for student:', student_id);
+    const hashedPassword = await bcrypt.hash(password, 8); // Reduced from 10 to 8 for faster registration
+
+    // Upload profile picture and ID card conditionally (ImageKit or local)
+    let profilePictureUrl = null;
+    let idCardUrl = null;
+
+    const uploadPromises: Promise<any>[] = [];
+
+    if (profilePicFile) {
+      if (shouldUseImageKit() && imagekit && profilePicFile.buffer) {
+        const profileUploadPromise = imagekit.upload({
+          file: profilePicFile.buffer,
+          fileName: `${student_id}-profile-${Date.now()}.jpg`,
+          folder: "/unyva_profiles",
+        }).then(result => {
+          profilePictureUrl = result.url;
+          console.log('📸 Profile picture uploaded to ImageKit:', profilePictureUrl);
+          return pool.query('UPDATE students SET profile_picture = $1 WHERE student_id = $2', [result.url, student_id]);
+        }).catch(error => {
+          console.error('⚠️ Profile picture upload failed:', error.message);
+        });
+        uploadPromises.push(profileUploadPromise);
+      } else {
+        // Local storage: multer.diskStorage should have saved file
+        const filename = (profilePicFile.filename as string) || profilePicFile.originalname;
+        profilePictureUrl = getLocalUrl('profiles', filename);
+        // update DB asynchronously
+        uploadPromises.push(pool.query('UPDATE students SET profile_picture = $1 WHERE student_id = $2', [profilePictureUrl, student_id]));
+        console.log('📸 Profile picture saved locally:', profilePictureUrl);
+      }
+    }
+
+    if (idCardFile) {
+      if (shouldUseImageKit() && imagekit && idCardFile.buffer) {
+        const idCardUploadPromise = imagekit.upload({
+          file: idCardFile.buffer,
+          fileName: `${student_id}-idcard-${Date.now()}.jpg`,
+          folder: "/unyva_idcards",
+        }).then(result => {
+          idCardUrl = result.url;
+          console.log('🆔 ID card uploaded to ImageKit:', idCardUrl);
+          return pool.query('UPDATE students SET id_card = $1 WHERE student_id = $2', [result.url, student_id]);
+        }).catch(error => {
+          console.error('⚠️ ID card upload failed:', error.message);
+        });
+        uploadPromises.push(idCardUploadPromise);
+      } else {
+        const filename = (idCardFile.filename as string) || idCardFile.originalname;
+        idCardUrl = getLocalUrl('idcards', filename);
+        uploadPromises.push(pool.query('UPDATE students SET id_card = $1 WHERE student_id = $2', [idCardUrl, student_id]));
+        console.log('🆔 ID card saved locally:', idCardUrl);
+      }
+    }
+
+    // Fire-and-forget updates
+    Promise.allSettled(uploadPromises).then(results => {
+      console.log('📤 Image upload/update results:', results.map(r => r.status));
+    });
+
+    // Convert date from "DD-MM-YYYY" to "YYYY-MM-DD" for PostgreSQL
+    const [day, month, year] = date_of_birth.split('-');
+    const formattedDob = `${year}-${month}-${day}`;
+
+    console.log('📅 Original date:', date_of_birth);
+    console.log('📅 Formatted date for PostgreSQL:', formattedDob);
+
+    // Get university_id from universities table if university is provided
+    let universityId = null;
+    if (university) {
+      const universityResult = await pool.query(
+        'SELECT id FROM universities WHERE name = $1',
+        [university]
+      );
+      if (universityResult.rows.length > 0) {
+        universityId = universityResult.rows[0].id;
+        console.log('🏫 Found university ID:', universityId, 'for university:', university);
+      }
+    }
+
+    const verificationToken = crypto.randomBytes(32).toString('hex');
+
+    console.log('💾 Inserting complete student record into database...');
+    const insertResult = await pool.query(
+      `INSERT INTO students
+        (student_id, email, first_name, last_name, phone, gender, date_of_birth,
+         hall_of_residence, room_number, password, profile_picture, id_card,
+         verification_token, is_verified, role, delivery_code, is_delivery_approved,
+         university, university_id, program, graduation_year, registration_complete)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+       RETURNING student_id, email, first_name, last_name, phone, role, university, program`,
+      [
+        student_id,
+        email,
+        first_name,
+        last_name,
+        phone,
+        gender,
+        formattedDob,
+        hall_of_residence,
+        room_number,
+        hashedPassword,
+        profilePictureUrl,
+        idCardUrl,
+        verificationToken,
+        true, // is_verified
+        role,
+        delivery_code,
+        role === 'delivery', // is_delivery_approved
+        university,
+        universityId,
+        program,
+        graduation_year,
+        true, // registration_complete
+      ]
+    );
+
+    console.log('✅ Student registration completed successfully:', insertResult.rows[0]);
+
+    // Mark delivery code as used if role is delivery
+    if (role === 'delivery' && delivery_code) {
+      await deliveryCodeManager.useCode(delivery_code, student_id);
+      console.log('✅ Delivery code marked as used:', delivery_code);
+    }
+
+    // Send verification email asynchronously (fire-and-forget)
+    if (transporter) {
+      const verifyLink = `${process.env.BASE_URL}/api/students/verify-email?token=${verificationToken}`;
+      transporter.sendMail({
+        from: `"Unyva UG" <${process.env.EMAIL_USER}>`,
+        to: email,
+        subject: 'Verify your Unyva account',
+        html: `<p>Hello ${first_name},</p>
+               <p>Please click the link below to verify your email:</p>
+               <a href="${verifyLink}">${verifyLink}</a>`,
+      }).then(() => {
+        console.log('📧 Verification email sent to:', email);
+      }).catch((emailError: any) => {
+        console.log('⚠️ Email sending failed, but registration continues:', emailError?.message || 'Unknown error');
+      });
+    } else {
+      console.log('⚠️ Email transporter not available, skipping email verification');
+    }
+
+    console.log('✅ COMPLETE REGISTRATION FINISHED SUCCESSFULLY');
+    console.log('👤 Student ID:', student_id);
+    console.log('📸 Profile picture saved:', profilePicFile?.filename || 'No file uploaded');
+    console.log('🆔 ID card saved:', idCardFile?.filename || 'No file uploaded');
+    console.log('🎯 Role:', role);
+    console.log('🏠 Hall of residence:', hall_of_residence);
+    if (room_number) console.log('🚪 Room number:', room_number);
+    if (role === 'delivery') {
+      console.log('🚚 Delivery code used:', delivery_code);
+    }
+
+    res.status(201).json({
+      message: 'Registration completed successfully!',
+      student: insertResult.rows[0]
+    });
+  } catch (err: any) {
+    console.error('❌ Complete Registration Error:', err);
+    console.error('Error details:', {
+      message: err.message,
+      code: err.code,
+      detail: err.detail,
+      table: err.table,
+      constraint: err.constraint
+    });
+
+    // Handle duplicate student_id with 409 response
+    if (err.code === '23505') { // Unique violation
+      res.status(409).json({
+        error: 'Student with this email or student ID already exists.',
+        details: err.detail
+      });
+    } else {
+      res.status(500).json({
+        error: 'Registration failed',
+        message: err.message,
+        code: err.code
+      });
+    }
+  }
+};
+
+// VERIFY EMAIL - NO CHANGES NEEDED
+export const verifyEmail = async (req: Request, res: Response): Promise<void> => {
+  const { token } = req.query;
+
+  if (!token || typeof token !== 'string') {
+    res.status(400).json({ error: 'Invalid verification token' });
+    return;
+  }
+
+  try {
+    const result = await pool.query(
+      `UPDATE students 
+       SET is_verified = TRUE, verification_token = NULL 
+       WHERE verification_token = $1 
+       RETURNING *`,
+      [token]
+    );
+
+    if (result.rows.length === 0) {
+      res.status(400).json({ error: 'Invalid or expired token' });
       return;
     }
 
+    res.status(200).json({ message: 'Email verified successfully!' });
+  } catch (err) {
+    console.error('❌ Email Verification Error:', err);
+    res.status(500).json({ error: 'Email verification failed' });
+  }
+};
+
+// LOGIN - UPDATED TO INCLUDE ROLE IN RESPONSE
+export const loginStudent = async (req: Request, res: Response): Promise<void> => {
+  const { student_id, password } = req.body;
+
+  console.log('🔐 Login attempt for student_id:', student_id);
+
+  if (!student_id || !password) {
+    res.status(400).json({ error: 'Student ID and password are required' });
+    return;
+  }
+
+  try {
     const result = await pool.query(
       'SELECT * FROM students WHERE student_id = $1',
       [student_id]
     );
 
-    if (result.rows.length === 0) {
-      res.status(401).json({ error: 'Invalid credentials' });
-      return;
-    }
-
     const student = result.rows[0];
-    const isValidPassword = await bcrypt.compare(password, student.password);
 
-    if (!isValidPassword) {
-      res.status(401).json({ error: 'Invalid credentials' });
+    console.log('📋 Student found:', student ? 'Yes' : 'No');
+    if (student) {
+      console.log('📋 Student has password:', !!student.password);
+      console.log('📋 Student is verified:', student.is_verified);
+      console.log('🎯 Student role:', student.role || 'buyer_seller');
+    }
+
+    if (!student) {
+      res.status(401).json({ error: 'Invalid student ID or password' });
       return;
     }
 
+    const match = await bcrypt.compare(password, student.password);
+    console.log('🔑 Password match:', match);
+    if (!match) {
+      res.status(401).json({ error: 'Invalid student ID or password' });
+      return;
+    }
+
+    const jwtSecret = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this-in-production';
+    console.log('🔑 Using JWT secret:', jwtSecret ? 'Set' : 'Not set');
+
+    // Include role in JWT token
     const token = jwt.sign(
-      { student_id: student.student_id, email: student.email, role: student.role },
-      JWT_SECRET,
+      {
+        student_id: student.student_id,
+        email: student.email,
+        first_name: student.first_name,
+        last_name: student.last_name,
+        role: student.role || 'buyer_seller',
+      },
+      jwtSecret,
       { expiresIn: '7d' }
     );
 
-    // Remove password from response
-    delete student.password;
-
-    res.json({
-      success: true,
+    // Return role information in response
+    res.status(200).json({
       message: 'Login successful',
-      student,
-      token
+      token,
+      student: {
+        student_id: student.student_id,
+        email: student.email,
+        first_name: student.first_name,
+        last_name: student.last_name,
+        phone: student.phone,
+        gender: student.gender,
+        date_of_birth: student.date_of_birth,
+        hall_of_residence: student.hall_of_residence,
+        room_number: student.room_number,
+        profile_picture: student.profile_picture,
+        role: student.role || 'buyer_seller',
+        is_delivery_approved: student.is_delivery_approved,
+        university: student.university,
+        program: student.program,
+      },
     });
-  } catch (err: any) {
-    console.error('❌ Login Student Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to login',
-      context: 'student/loginStudent',
-    });
+  } catch (err) {
+    console.error('❌ Login error:', err);
+    res.status(500).json({ error: 'Login failed' });
   }
 };
 
-// GET /api/students/profile - Get student profile
-export const getProfile = async (req: any, res: Response): Promise<void> => {
+// GET: Logged-in student's profile - UPDATED TO INCLUDE NEW FIELDS
+export const getStudentProfile = async (req: any, res: Response): Promise<void> => {
   try {
-    const studentId = req.user?.student_id;
+    const studentIdFromToken = req.user?.student_id;
 
-    if (!studentId) {
-      res.status(401).json({ error: 'Authentication required' });
+    if (!studentIdFromToken) {
+      res.status(401).json({ error: 'Unauthorized: No student ID found in token' });
       return;
     }
 
+    // Include all fields in profile response
     const result = await pool.query(
-      `SELECT s.student_id, s.first_name, s.last_name, s.email, s.phone, s.profile_picture,
-              s.university_id, s.hall_id, s.room_number, s.has_paid, s.payment_date,
-              u.name as university_name, uh.full_name as hall_name
-       FROM students s
-       LEFT JOIN universities u ON s.university_id = u.id
-       LEFT JOIN university_halls uh ON s.hall_id = uh.id
-       WHERE s.student_id = $1`,
-      [studentId]
+      `SELECT student_id, email, first_name, last_name, phone, gender,
+              date_of_birth, hall_of_residence, room_number, profile_picture, role,
+              is_delivery_approved, university, program, graduation_year
+       FROM students WHERE student_id = $1`,
+      [studentIdFromToken]
     );
 
     if (result.rows.length === 0) {
@@ -138,139 +548,24 @@ export const getProfile = async (req: any, res: Response): Promise<void> => {
       return;
     }
 
-    res.json({
-      success: true,
-      profile: result.rows[0]
-    });
-  } catch (err: any) {
+    res.status(200).json({ student: result.rows[0] });
+  } catch (err) {
     console.error('❌ Get Profile Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to fetch profile',
-      context: 'student/getProfile',
-    });
+    res.status(500).json({ error: 'Failed to fetch profile' });
   }
 };
 
-// PUT /api/students/profile - Update student profile
-export const updateProfile = async (req: any, res: Response): Promise<void> => {
-  try {
-    const studentId = req.user?.student_id;
-    const { first_name, last_name, phone, profile_picture, university_id, hall_id, room_number } = req.body;
-
-    if (!studentId) {
-      res.status(401).json({ error: 'Authentication required' });
-      return;
-    }
-
-    const updates: string[] = [];
-    const values: any[] = [];
-    let paramIndex = 1;
-
-    if (first_name !== undefined) { updates.push(`first_name = $${paramIndex++}`); values.push(first_name); }
-    if (last_name !== undefined) { updates.push(`last_name = $${paramIndex++}`); values.push(last_name); }
-    if (phone !== undefined) { updates.push(`phone = $${paramIndex++}`); values.push(phone); }
-    if (profile_picture !== undefined) { updates.push(`profile_picture = $${paramIndex++}`); values.push(profile_picture); }
-    if (university_id !== undefined) { updates.push(`university_id = $${paramIndex++}`); values.push(university_id); }
-    if (hall_id !== undefined) { updates.push(`hall_id = $${paramIndex++}`); values.push(hall_id); }
-    if (room_number !== undefined) { updates.push(`room_number = $${paramIndex++}`); values.push(room_number); }
-
-    if (updates.length === 0) {
-      res.status(400).json({ error: 'No fields to update' });
-      return;
-    }
-
-    updates.push(`updated_at = CURRENT_TIMESTAMP`);
-    values.push(studentId);
-
-    const query = `UPDATE students SET ${updates.join(', ')} WHERE student_id = $${paramIndex} RETURNING *`;
-    const result = await pool.query(query, values);
-
-    if (result.rows.length === 0) {
-      res.status(404).json({ error: 'Student not found' });
-      return;
-    }
-
-    delete result.rows[0].password;
-
-    res.json({
-      success: true,
-      profile: result.rows[0]
-    });
-  } catch (err: any) {
-    console.error('❌ Update Profile Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to update profile',
-      context: 'student/updateProfile',
-    });
-  }
-};
-
-// PUT /api/students/change-password - Change password
-export const changePassword = async (req: any, res: Response): Promise<void> => {
-  try {
-    const studentId = req.user?.student_id;
-    const { current_password, new_password } = req.body;
-
-    if (!studentId) {
-      res.status(401).json({ error: 'Authentication required' });
-      return;
-    }
-
-    if (!current_password || !new_password) {
-      res.status(400).json({ error: 'Current password and new password are required' });
-      return;
-    }
-
-    const result = await pool.query(
-      'SELECT password FROM students WHERE student_id = $1',
-      [studentId]
-    );
-
-    if (result.rows.length === 0) {
-      res.status(404).json({ error: 'Student not found' });
-      return;
-    }
-
-    const isValidPassword = await bcrypt.compare(current_password, result.rows[0].password);
-
-    if (!isValidPassword) {
-      res.status(401).json({ error: 'Current password is incorrect' });
-      return;
-    }
-
-    const hashedPassword = await bcrypt.hash(new_password, 10);
-
-    await pool.query(
-      'UPDATE students SET password = $1, updated_at = CURRENT_TIMESTAMP WHERE student_id = $2',
-      [hashedPassword, studentId]
-    );
-
-    res.json({
-      success: true,
-      message: 'Password changed successfully'
-    });
-  } catch (err: any) {
-    console.error('❌ Change Password Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to change password',
-      context: 'student/changePassword',
-    });
-  }
-};
-
-// GET /api/students/:studentId/public - Get public student info
-export const getPublicStudentInfo = async (req: Request, res: Response): Promise<void> => {
+// GET: Student profile by ID - UPDATED TO INCLUDE NEW FIELDS
+export const getStudentProfileById = async (req: Request, res: Response): Promise<void> => {
   try {
     const { studentId } = req.params;
 
+    // Include all fields in profile response
     const result = await pool.query(
-      `SELECT student_id, first_name, last_name, profile_picture, university_id, hall_id,
-              room_number, created_at
-       FROM students
-       WHERE student_id = $1`,
+      `SELECT student_id, email, first_name, last_name, phone, gender,
+              date_of_birth, hall_of_residence, room_number, profile_picture, role,
+              is_delivery_approved, university, program, graduation_year
+       FROM students WHERE student_id = $1`,
       [studentId]
     );
 
@@ -279,44 +574,352 @@ export const getPublicStudentInfo = async (req: Request, res: Response): Promise
       return;
     }
 
-    res.json({
-      success: true,
-      student: result.rows[0]
+    res.status(200).json({ student: result.rows[0] });
+  } catch (err) {
+    console.error('❌ Get Profile By ID Error:', err);
+    res.status(500).json({ error: 'Failed to fetch profile' });
+  }
+};
+
+// UPDATE: Student profile - UPDATED TO HANDLE FORM DATA PROPERLY
+export const updateStudentProfile = async (req: any, res: Response): Promise<void> => {
+  try {
+    const studentIdFromToken = req.user?.student_id;
+
+    if (!studentIdFromToken) {
+      res.status(401).json({ error: 'Unauthorized: No student ID found in token' });
+      return;
+    }
+
+    console.log('🔄 UPDATE PROFILE REQUEST RECEIVED');
+    console.log('📦 req.method:', req.method);
+    console.log('📦 req.url:', req.url);
+    console.log('📦 req.body:', req.body);
+    console.log('🖼 req.files:', req.files ? req.files.length : 'No files');
+    console.log('🔑 req.headers.content-type:', req.headers['content-type']);
+    console.log('🔑 req.headers.authorization:', req.headers['authorization'] ? 'Present' : 'Missing');
+
+    // Handle both regular body data and form data
+    const { first_name, last_name, phone, gender, hall_of_residence, room_number } = req.body;
+
+    console.log('📝 Extracted fields:', { first_name, last_name, phone, gender, hall_of_residence, room_number });
+    console.log('🔍 Field types:', {
+      first_name: typeof first_name,
+      last_name: typeof last_name,
+      phone: typeof phone,
+      gender: typeof gender,
+      hall_of_residence: typeof hall_of_residence,
+      room_number: typeof room_number
     });
+
+    // Handle profile picture upload - with upload.any(), files are in req.files
+    let profilePictureUrl = null;
+    if (req.files && req.files.length > 0) {
+      console.log('📁 Files found:', req.files.length);
+      req.files.forEach((file: Express.Multer.File, index: number) => {
+        console.log(`📁 File ${index}: fieldname=${file.fieldname}, filename=${file.filename}, size=${file.size}`);
+      });
+      const profilePicFile = req.files.find((file: Express.Multer.File) => file.fieldname === 'profile_picture');
+      if (profilePicFile) {
+        if (shouldUseImageKit() && imagekit && profilePicFile.buffer) {
+          const profileResult = await imagekit.upload({
+            file: profilePicFile.buffer,
+            fileName: `${studentIdFromToken}-profile-${Date.now()}.jpg`,
+            folder: "/unyva_profiles",
+          });
+          profilePictureUrl = profileResult.url;
+          console.log('📸 Profile picture uploaded to ImageKit:', profilePictureUrl);
+        } else {
+          // Local storage
+          const filename = (profilePicFile.filename as string) || profilePicFile.originalname;
+          profilePictureUrl = getLocalUrl('profiles', filename);
+          console.log('📸 Profile picture saved locally:', profilePictureUrl);
+        }
+      } else {
+        console.log('⚠️ No profile_picture file found in req.files');
+      }
+    } else {
+      console.log('⚠️ No files in req.files');
+    }
+
+    // Build dynamic update query based on provided fields
+    const updateFields = [];
+    const values = [];
+    let paramIndex = 1;
+
+    if (first_name !== undefined && first_name !== '') {
+      if (Array.isArray(first_name)) {
+        console.log('⚠️ Warning: first_name is an array, using first element:', first_name[0]);
+        updateFields.push(`first_name = $${paramIndex++}`);
+        values.push(first_name[0]);
+      } else {
+        updateFields.push(`first_name = $${paramIndex++}`);
+        values.push(first_name);
+      }
+    }
+    if (last_name !== undefined && last_name !== '') {
+      if (Array.isArray(last_name)) {
+        console.log('⚠️ Warning: last_name is an array, using first element:', last_name[0]);
+        updateFields.push(`last_name = $${paramIndex++}`);
+        values.push(last_name[0]);
+      } else {
+        updateFields.push(`last_name = $${paramIndex++}`);
+        values.push(last_name);
+      }
+    }
+    if (phone !== undefined && phone !== '') {
+      if (Array.isArray(phone)) {
+        console.log('⚠️ Warning: phone is an array, using first element:', phone[0]);
+        updateFields.push(`phone = $${paramIndex++}`);
+        values.push(phone[0]);
+      } else {
+        updateFields.push(`phone = $${paramIndex++}`);
+        values.push(phone);
+      }
+    }
+    if (gender !== undefined && gender !== '') {
+      if (Array.isArray(gender)) {
+        console.log('⚠️ Warning: gender is an array, using first element:', gender[0]);
+        updateFields.push(`gender = $${paramIndex++}`);
+        values.push(gender[0]);
+      } else {
+        updateFields.push(`gender = $${paramIndex++}`);
+        values.push(gender);
+      }
+    }
+    if (hall_of_residence !== undefined && hall_of_residence !== '') {
+      if (Array.isArray(hall_of_residence)) {
+        console.log('⚠️ Warning: hall_of_residence is an array, using first element:', hall_of_residence[0]);
+        updateFields.push(`hall_of_residence = $${paramIndex++}`);
+        values.push(hall_of_residence[0]);
+      } else {
+        updateFields.push(`hall_of_residence = $${paramIndex++}`);
+        values.push(hall_of_residence);
+      }
+    }
+    if (room_number !== undefined && room_number !== '') {
+      if (Array.isArray(room_number)) {
+        console.log('⚠️ Warning: room_number is an array, using first element:', room_number[0]);
+        updateFields.push(`room_number = $${paramIndex++}`);
+        values.push(room_number[0]);
+      } else {
+        updateFields.push(`room_number = $${paramIndex++}`);
+        values.push(room_number);
+      }
+    }
+    if (profilePictureUrl !== null) {
+      updateFields.push(`profile_picture = $${paramIndex++}`);
+      values.push(profilePictureUrl);
+    }
+
+    if (updateFields.length === 0) {
+      res.status(400).json({ error: 'No fields to update', reqBody: req.body });
+      return;
+    }
+
+
+
+    // Add student_id at the end
+    values.push(studentIdFromToken);
+
+    const query = `
+      UPDATE students
+      SET ${updateFields.join(', ')}
+      WHERE student_id = $${paramIndex}
+      RETURNING student_id, email, first_name, last_name, phone, gender,
+                date_of_birth, hall_of_residence, room_number, profile_picture, role,
+                is_delivery_approved, university, program, graduation_year
+    `;
+
+    console.log('📝 Final update query:', query);
+    console.log('📝 Query values:', values);
+
+    try {
+      const result = await pool.query(query, values);
+
+      if (result.rows.length === 0) {
+        res.status(404).json({ error: 'Student not found' });
+        return;
+      }
+
+      res.status(200).json({
+        message: 'Profile updated successfully',
+        student: result.rows[0]
+      });
+    } catch (queryError: any) {
+      console.error('❌ Database query error:', queryError);
+      res.status(500).json({
+        error: 'Database query failed',
+        message: queryError.message,
+        code: queryError.code,
+        detail: queryError.detail
+      });
+    }
   } catch (err: any) {
-    console.error('❌ Get Public Student Info Error:', err);
-    handleControllerError(res, err, {
-      statusCode: 500,
-      publicError: 'Failed to fetch student info',
-      context: 'student/getPublicStudentInfo',
+    console.error('❌ Update Profile Error:', err);
+    console.error('Error details:', {
+      message: err.message,
+      code: err.code,
+      detail: err.detail,
+      table: err.table,
+      constraint: err.constraint,
+      stack: err.stack
+    });
+    res.status(500).json({
+      error: 'Failed to update profile',
+      message: err.message,
+      code: err.code,
+      detail: err.detail
     });
   }
 };
 
-// ---------------------------------------------------------------------------
-// Legacy/backward-compatible exports required by src/routes/studentroutes.ts
-// ---------------------------------------------------------------------------
+// DELETE: Account deletion - COMPLETE DATA CLEANUP
+export const deleteAccount = async (req: any, res: Response): Promise<void> => {
+  try {
+    const { email, student_id } = req.body;
 
-// Step-1 registration legacy name
-export const registerStep1 = registerStudent;
+    if (!email && !student_id) {
+      res.status(400).json({ error: 'Email or student_id is required in the request body' });
+      return;
+    }
 
-// Complete registration legacy name (best-effort: update profile using provided fields)
-export const completeRegistration = updateProfile;
+    console.log('🗑️ ACCOUNT DELETION REQUEST RECEIVED');
+    console.log('📧 Email:', email);
+    console.log('👤 Student ID:', student_id);
 
-// Email verification legacy name (not present in this controller snapshot)
-export const verifyEmail = async (_req: any, res: Response): Promise<void> => {
-  res.status(501).json({ success: false, error: 'verifyEmail not implemented' });
-};
+    // Find the student by email or student_id
+    let studentQuery = 'SELECT * FROM students WHERE ';
+    let queryParams: any[] = [];
+    if (email && student_id) {
+      studentQuery += 'email = $1 OR student_id = $2';
+      queryParams = [email, student_id];
+    } else if (email) {
+      studentQuery += 'email = $1';
+      queryParams = [email];
+    } else {
+      studentQuery += 'student_id = $1';
+      queryParams = [student_id];
+    }
 
-// Login is already compatible
-// export const loginStudent already exists and is imported directly by routes
+    const studentResult = await pool.query(studentQuery, queryParams);
+    if (studentResult.rows.length === 0) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
 
-// Profile legacy names
-export const getStudentProfile = getProfile;
-export const getStudentProfileById = getPublicStudentInfo;
-export const updateStudentProfile = updateProfile;
+    const student = studentResult.rows[0];
+    const studentId = student.student_id;
 
-// Delete account legacy name
-export const deleteAccount = async (_req: any, res: Response): Promise<void> => {
-  res.status(501).json({ success: false, error: 'deleteAccount not implemented' });
+    console.log('👤 Found student:', studentId);
+
+    // Start transaction for complete data cleanup
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      // Delete images from ImageKit or local storage if they exist
+      if (student.profile_picture) {
+        try {
+          if (shouldUseImageKit() && imagekit) {
+            const urlParts = student.profile_picture.split('/');
+            const fileId = urlParts[urlParts.length - 1];
+            await imagekit.deleteFile(fileId);
+            console.log('🗑️ Deleted profile picture from ImageKit:', fileId);
+          } else {
+            const parts = student.profile_picture.split('/');
+            const filename = parts[parts.length - 1];
+            await deleteLocalFile('profiles', filename);
+            console.log('🗑️ Deleted local profile picture:', filename);
+          }
+        } catch (imageError) {
+          console.error('⚠️ Failed to delete profile picture:', imageError);
+        }
+      }
+
+      if (student.id_card) {
+        try {
+          if (shouldUseImageKit() && imagekit) {
+            const urlParts = student.id_card.split('/');
+            const fileId = urlParts[urlParts.length - 1];
+            await imagekit.deleteFile(fileId);
+            console.log('🗑️ Deleted ID card from ImageKit:', fileId);
+          } else {
+            const parts = student.id_card.split('/');
+            const filename = parts[parts.length - 1];
+            await deleteLocalFile('idcards', filename);
+            console.log('🗑️ Deleted local ID card:', filename);
+          }
+        } catch (imageError) {
+          console.error('⚠️ Failed to delete ID card:', imageError);
+        }
+      }
+
+      // 1. Delete all reviews by this student
+      console.log('🗑️ Deleting reviews...');
+      await client.query('DELETE FROM reviews WHERE student_id = $1', [studentId]);
+
+      // 2. Delete all products by this student
+      console.log('🗑️ Deleting products...');
+      await client.query('DELETE FROM products WHERE seller_id = $1', [studentId]);
+
+      // 3. Delete all services by this student
+      console.log('🗑️ Deleting services...');
+      await client.query('DELETE FROM services WHERE provider_id = $1', [studentId]);
+
+      // 4. Delete all cart items by this student
+      console.log('🗑️ Deleting cart items...');
+      await client.query('DELETE FROM cart WHERE student_id = $1', [studentId]);
+
+      // Note: Keeping transaction records (orders, payments, deliveries) for 6 months
+
+      // 5. Finally, delete the student record
+      console.log('🗑️ Deleting student record...');
+      const deleteResult = await client.query(
+        'DELETE FROM students WHERE student_id = $1 RETURNING student_id, email, first_name, last_name',
+        [studentId]
+      );
+
+      if (deleteResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        res.status(404).json({ error: 'Student not found' });
+        return;
+      }
+
+      await client.query('COMMIT');
+
+      console.log('✅ ACCOUNT DELETION COMPLETED SUCCESSFULLY');
+      console.log('👤 Deleted student:', deleteResult.rows[0]);
+
+      res.status(200).json({
+        message: 'Account deleted successfully. Personal data and listings have been removed. Transaction records are retained for 6 months.',
+        deleted_student: deleteResult.rows[0]
+      });
+
+    } catch (deleteError: any) {
+      await client.query('ROLLBACK');
+      console.error('❌ Account deletion transaction failed:', deleteError);
+      throw deleteError;
+    } finally {
+      client.release();
+    }
+
+  } catch (err: any) {
+    console.error('❌ Account Deletion Error:', err);
+    console.error('Error details:', {
+      message: err.message,
+      code: err.code,
+      detail: err.detail,
+      table: err.table,
+      constraint: err.constraint,
+      stack: err.stack
+    });
+    res.status(500).json({
+      error: 'Failed to delete account',
+      message: err.message,
+      code: err.code,
+      detail: err.detail
+    });
+  }
 };

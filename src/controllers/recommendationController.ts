@@ -4,7 +4,6 @@ import { pool } from '../db.js';
 import { getPersonalizedRecommendations } from '../models/userBehaviorModel.js';
 import { getAllProducts, getProductsByCategory, getFeaturedProducts } from '../models/productModel.js';
 import { getFeaturedServices, getRelatedServices } from '../models/serviceModel.js';
-import { handleControllerError } from '../utils/apiError.js';
 
 export const getPersonalizedRecommendationsController = async (req: AuthRequest, res: Response) => {
   try {
@@ -52,11 +51,7 @@ export const getPersonalizedRecommendationsController = async (req: AuthRequest,
     });
   } catch (error) {
     console.error('Error getting personalized recommendations:', error);
-    handleControllerError(res, error, {
-      statusCode: 500,
-      publicError: 'Failed to get recommendations',
-      context: 'recommendation/getPersonalizedRecommendations',
-    });
+    res.status(500).json({ products: [], services: [] });
   }
 };
 
@@ -87,11 +82,7 @@ export const getTrendingItems = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('Error getting trending items:', error);
-    handleControllerError(res, error, {
-      statusCode: 500,
-      publicError: 'Failed to get trending items',
-      context: 'recommendation/getTrendingItems',
-    });
+    res.status(500).json({ products: [], services: [] });
   }
 };
 
@@ -133,10 +124,6 @@ export const getRelatedItems = async (req: Request, res: Response) => {
     }
   } catch (error) {
     console.error('Error getting related items:', error);
-    handleControllerError(res, error, {
-      statusCode: 500,
-      publicError: 'Failed to get related items',
-      context: 'recommendation/getRelatedItems',
-    });
+    res.status(500).json([]);
   }
 };

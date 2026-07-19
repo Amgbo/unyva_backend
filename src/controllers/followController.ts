@@ -2,7 +2,6 @@ import { Response } from 'express';
 import { AuthRequest } from '../middleware/authMiddleware.js';
 import { pool } from '../db.js';
 import { FollowModel } from '../models/followModel.js';
-import { handleControllerError } from '../utils/apiError.js';
 
 export class FollowController {
   // Follow a user
@@ -27,11 +26,7 @@ export class FollowController {
       res.status(201).json({ follow });
     } catch (error) {
       console.error('Error following user:', error);
-      handleControllerError(res, error, {
-        statusCode: 400,
-        publicError: 'Failed to follow user',
-        context: 'follow/followUser',
-      });
+      res.status(400).json({ error: error instanceof Error ? error.message : 'Unknown error' });
     }
   }
 
@@ -58,11 +53,7 @@ export class FollowController {
       res.json({ message: 'Successfully unfollowed user' });
     } catch (error) {
       console.error('Error unfollowing user:', error);
-      handleControllerError(res, error, {
-        statusCode: 500,
-        publicError: 'Failed to unfollow user',
-        context: 'follow/unfollowUser',
-      });
+      res.status(500).json({ error: 'Internal server error' });
     }
   }
 
@@ -80,11 +71,7 @@ export class FollowController {
       res.json({ isFollowing });
     } catch (error) {
       console.error('Error checking follow status:', error);
-      handleControllerError(res, error, {
-        statusCode: 500,
-        publicError: 'Failed to check follow status',
-        context: 'follow/isFollowing',
-      });
+      res.status(500).json({ error: 'Internal server error' });
     }
   }
 
@@ -99,11 +86,7 @@ export class FollowController {
       res.json(result);
     } catch (error) {
       console.error('Error fetching followers:', error);
-      handleControllerError(res, error, {
-        statusCode: 500,
-        publicError: 'Failed to fetch followers',
-        context: 'follow/getFollowers',
-      });
+      res.status(500).json({ error: 'Internal server error' });
     }
   }
 
@@ -118,11 +101,7 @@ export class FollowController {
       res.json(result);
     } catch (error) {
       console.error('Error fetching following:', error);
-      handleControllerError(res, error, {
-        statusCode: 500,
-        publicError: 'Failed to fetch following',
-        context: 'follow/getFollowing',
-      });
+      res.status(500).json({ error: 'Internal server error' });
     }
   }
 
@@ -136,11 +115,7 @@ export class FollowController {
       res.json(stats);
     } catch (error) {
       console.error('Error fetching follow stats:', error);
-      handleControllerError(res, error, {
-        statusCode: 500,
-        publicError: 'Failed to fetch follow stats',
-        context: 'follow/getFollowStats',
-      });
+      res.status(500).json({ error: 'Internal server error' });
     }
   }
 
@@ -159,11 +134,7 @@ export class FollowController {
       res.json(result);
     } catch (error) {
       console.error('Error fetching mutual follows:', error);
-      handleControllerError(res, error, {
-        statusCode: 500,
-        publicError: 'Failed to fetch mutual follows',
-        context: 'follow/getMutualFollows',
-      });
+      res.status(500).json({ error: 'Internal server error' });
     }
   }
 
@@ -198,11 +169,7 @@ export class FollowController {
       res.json({ leaderboard: result.rows });
     } catch (error) {
       console.error('Error fetching most followed leaderboard:', error);
-      handleControllerError(res, error, {
-        statusCode: 500,
-        publicError: 'Failed to fetch leaderboard',
-        context: 'follow/getMostFollowedLeaderboard',
-      });
+      res.status(500).json({ error: 'Internal server error' });
     }
   }
 
@@ -238,11 +205,7 @@ export class FollowController {
       res.json({ leaderboard: result.rows });
     } catch (error) {
       console.error('Error fetching top sellers leaderboard:', error);
-      handleControllerError(res, error, {
-        statusCode: 500,
-        publicError: 'Failed to fetch leaderboard',
-        context: 'follow/getTopSellersLeaderboard',
-      });
+      res.status(500).json({ error: 'Internal server error' });
     }
   }
 
@@ -308,11 +271,7 @@ export class FollowController {
       res.json({ leaderboard: result.rows });
     } catch (error) {
       console.error('Error fetching highest rated leaderboard:', error);
-      handleControllerError(res, error, {
-        statusCode: 500,
-        publicError: 'Failed to fetch leaderboard',
-        context: 'follow/getHighestRatedLeaderboard',
-      });
+      res.status(500).json({ error: 'Internal server error' });
     }
   }
 
@@ -338,11 +297,7 @@ export class FollowController {
       res.json({ leaderboard: result.rows });
     } catch (error) {
       console.error('Error fetching service providers leaderboard:', error);
-      handleControllerError(res, error, {
-        statusCode: 500,
-        publicError: 'Failed to fetch leaderboard',
-        context: 'follow/getServiceProvidersLeaderboard',
-      });
+      res.status(500).json({ error: 'Internal server error' });
     }
   }
 }
