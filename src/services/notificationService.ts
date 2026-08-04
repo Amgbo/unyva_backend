@@ -304,66 +304,6 @@ export class NotificationService {
   }
 
   /**
-   * Process pending notifications (for scheduled notifications)
-   * Uses exponential backoff for retries.
-   * Returns the number of notifications that were processed.
-   */
-  async processPendingNotifications(): Promise<number> {
-    let processedCount = 0;
-    try {
-      const pendingNotifications = await NotificationModel.getPendingNotifications();
-
-      for (const notification of pendingNotifications) {
-        try {
-          // Calculate delay based on retry count using exponential backoff
-          const retryCount = notification.retry_count || 0;
-          const baseDelay = 1000; // 1 second base delay
-          const maxDelay = 300000; // 5 minutes max delay
-          const delay = Math.min(baseDelay * Math.pow(2, retryCount), maxDelay);
-          
-          // Apply exponential backoff delay if this is a retry
-          if (retryCount > 0) {
-            console.log(`⏳ Waiting ${delay}ms before retry for notification ${notification.id}`);
-            await new Promise(resolve => setTimeout(resolve, delay));
-          }
-
-          await this.sendNotification(notification);
-          processedCount++;
-        } catch (error) {
-          console.error(`Failed to send notification ${notification.id}:`, error);
-
-          // Increment retry count
-          const updatedNotification = await NotificationModel.incrementRetryCount(notification.id!);
-          const currentRetry = updatedNotification?.retry_count || 0;
-          const maxRetries = notification.max_retries || 3;
-
-          // If max retries reached, mark as failed
-          if (currentRetry >= maxRetries) {
-            await NotificationModel.updateStatus(notification.id!, 'failed', {
-              error_message: `Max retries (${maxRetries}) exceeded. Last error: ${error instanceof Error ? error.message : 'Unknown error'}`
-            });
-            console.error(`❌ Notification ${notification.id} marked as failed after ${currentRetry} retries`);
-          } else {
-            // Allow it to be picked up again in a future cycle
-            // (because we atomically claim pending -> in_progress).
-            await NotificationModel.updateStatus(notification.id!, 'pending', {
-              error_message: error instanceof Error ? error.message : 'Unknown error'
-            });
-
-            const nextDelay = Math.min(1000 * Math.pow(2, currentRetry), 300000);
-            console.log(`🔄 Notification ${notification.id} will retry in ${nextDelay}ms (attempt ${currentRetry + 1}/${maxRetries})`);
-          }
-        }
-      }
-
-    } catch (error) {
-      console.error('Error processing pending notifications:', error);
-    }
-
-    return processedCount;
-  }
-
-  /**
    * Register push token for a user with validation
    */
   async registerPushToken(userId: string, pushToken: string): Promise<{ success: boolean; message: string }> {

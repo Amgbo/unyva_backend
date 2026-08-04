@@ -57,7 +57,6 @@ app.set('trust proxy', 1);
 
 // Server variable to be used in signal handlers
 let server: any;
-let notificationProcessorInterval: ReturnType<typeof setInterval> | null = null;
 let notificationCleanupInterval: ReturnType<typeof setInterval> | null = null;
 let isShuttingDown = false;
 
@@ -243,51 +242,6 @@ app.use(errorSanitizer);
       console.log(` Server also accessible at http://localhost:${PORT}`);
       console.log(` Environment: ${process.env.NODE_ENV || 'development'}`);
 
-      // Start notification processor to handle pending/scheduled notifications
-      let processorRunning = false;
-      let processorErrors = 0;
-      let lastProcessorLogAt = 0;
-
-      const intervalMs = Number(process.env.NOTIFICATION_PROCESSOR_INTERVAL_MS) || 30000;
-
-      notificationProcessorInterval = setInterval(async () => {
-        // Skip cycles if already running
-        if (processorRunning) return;
-
-        processorRunning = true;
-        try {
-          const startTime = Date.now();
-          const processedCount = await notificationService.processPendingNotifications();
-          const duration = Date.now() - startTime;
-
-          // Log only when we actually did work, or at a slow health-check cadence
-          // to prevent console + DB spam.
-          if (processedCount > 0) {
-            console.log(`✅ Notification processor completed in ${duration}ms (${processedCount} processed)`);
-          } else {
-            const now = Date.now();
-            if ((now - lastProcessorLogAt) > 10 * 60 * 1000) { // once every 10 minutes
-              console.log(`✅ Notification processor idle for ${duration}ms (0 processed)`);
-              lastProcessorLogAt = now;
-            }
-          }
-
-          processorErrors = 0; // Reset error counter on success
-        } catch (error) {
-          processorErrors++;
-          console.error(`❌ Error processing pending notifications (attempt ${processorErrors}):`, error);
-
-          if (processorErrors >= 3) {
-            console.error('🚨 CRITICAL: Notification processor has failed 3 times consecutively!');
-            // TODO: Send alert to monitoring system (Sentry, DataDog, etc.)
-          }
-        } finally {
-          processorRunning = false;
-        }
-      }, intervalMs);
-
-
-
       // Start notification cleanup job (daily)
       notificationCleanupInterval = setInterval(async () => {
         try {
@@ -311,11 +265,6 @@ const shutdown = async (signal: 'SIGTERM' | 'SIGINT') => {
 
   isShuttingDown = true;
   console.log(`${signal} signal received: closing HTTP server`);
-
-  if (notificationProcessorInterval) {
-    clearInterval(notificationProcessorInterval);
-    notificationProcessorInterval = null;
-  }
 
   if (notificationCleanupInterval) {
     clearInterval(notificationCleanupInterval);

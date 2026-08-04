@@ -201,31 +201,6 @@ export class NotificationModel {
     return result.rowCount ?? 0;
   }
 
-  static async getPendingNotifications(): Promise<Notification[]> {
-    const query = `
-      SELECT * FROM notifications
-      WHERE status = 'pending'
-      AND (scheduled_at IS NULL OR scheduled_at <= CURRENT_TIMESTAMP)
-      ORDER BY priority DESC, created_at ASC
-    `;
-
-    const result = await pool.query(query);
-    return result.rows;
-  }
-
-
-  static async incrementRetryCount(id: number): Promise<Notification | null> {
-    const query = `
-      UPDATE notifications
-      SET retry_count = retry_count + 1, updated_at = CURRENT_TIMESTAMP
-      WHERE id = $1
-      RETURNING *
-    `;
-
-    const result = await pool.query(query, [id]);
-    return result.rows.length > 0 ? result.rows[0] : null;
-  }
-
   static async delete(id: number): Promise<boolean> {
     const result = await pool.query('DELETE FROM notifications WHERE id = $1', [id]);
     return (result.rowCount ?? 0) > 0;
