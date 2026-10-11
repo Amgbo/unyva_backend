@@ -227,9 +227,60 @@ async function initializeDatabase() {
       } else {
         console.log('✅ image_urls column already exists');
       }
+
+      // Variable-priced services may leave price empty until the provider and
+      // customer agree on the amount.
+      const servicePriceCheck = await pool.query(`
+        SELECT is_nullable
+        FROM information_schema.columns
+        WHERE table_name = 'services' AND column_name = 'price'
+      `);
+
+      if (servicePriceCheck.rows[0]?.is_nullable === 'NO') {
+        console.log('🔧 Allowing NULL service prices for variable-priced services...');
+        await pool.query(`
+          ALTER TABLE services
+            ALTER COLUMN price DROP NOT NULL
+        `);
+        console.log('✅ Service prices can now be variable');
+      } else {
+        console.log('✅ Service price column already allows NULL');
+      }
     } else {
       console.log('❌ services table does not exist! Please run the services migration SQL first.');
     }
+
+    // Ensure behavior tracking tables exist even when SQL migrations have not
+    // been applied to an existing deployment.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS product_views (
+        id SERIAL PRIMARY KEY,
+        student_id VARCHAR(20) NOT NULL REFERENCES students(student_id) ON DELETE SET NULL,
+        product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        view_duration_seconds INTEGER DEFAULT 0,
+        viewed_at TIMESTAMP DEFAULT NOW(),
+        session_id VARCHAR(255),
+        device_info JSONB,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS service_views (
+        id SERIAL PRIMARY KEY,
+        student_id VARCHAR(20) NOT NULL REFERENCES students(student_id) ON DELETE CASCADE,
+        service_id INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+        view_duration_seconds INTEGER DEFAULT 0,
+        viewed_at TIMESTAMP DEFAULT NOW(),
+        session_id VARCHAR(255),
+        device_info JSONB,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_product_views_student_id ON product_views(student_id)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_product_views_product_id ON product_views(product_id)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_service_views_student_id ON service_views(student_id)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_service_views_service_id ON service_views(service_id)');
+    console.log('✅ Behavior tracking tables are ready');
 
     // Note: Using existing 'cart' table instead of 'cart_items'
     console.log('🔍 Checking cart table...');

@@ -5,7 +5,7 @@ export interface Service {
   student_id: string;
   title: string;
   description: string;
-  price: number;
+  price: number | null;
   category: 'Tutoring' | 'Academic Tutoring' | 'Writing & Research' | 'Laundry & Cleaning' | 'Cooking & Meal Prep' | 'Cooking & Meal Services' | 'Tech Support & Repairs' | 'IT & Tech Support' | 'Graphic Design' | 'Graphic Design & Creative' | 'Photography & Videography' | 'Transportation & Delivery' | 'Fitness & Wellness' | 'Music & Performance' | 'Event Planning' | 'Language Tutoring' | 'Programming & IT' | 'Career Services' | 'Other';
   contact_method: 'WhatsApp' | 'Call' | 'SMS' | 'in_app';
   hall_id?: number;
@@ -127,7 +127,7 @@ export interface CreateServiceData {
   student_id: string;
   title: string;
   description: string;
-  price: number;
+  price: number | null;
   category: Service['category'];
   contact_method: Service['contact_method'];
   hall_id?: number;

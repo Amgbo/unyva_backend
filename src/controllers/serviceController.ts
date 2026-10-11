@@ -180,7 +180,9 @@ export const createNewService = async (req: AuthRequest, res: Response): Promise
       student_id: studentId,
       title: req.body.title,
       description: req.body.description,
-      price: parseFloat(req.body.price),
+      price: req.body.price === undefined || req.body.price === null || req.body.price === ''
+        ? null
+        : parseFloat(req.body.price),
       category: req.body.category,
       contact_method: req.body.contact_method,
       hall_id: req.body.hall_id ? parseInt(req.body.hall_id, 10) : undefined,
@@ -218,18 +220,18 @@ export const createNewService = async (req: AuthRequest, res: Response): Promise
     }
 
     // Validate required fields
-    if (!serviceData.title || !serviceData.price || !serviceData.description ||
+    if (!serviceData.title || !serviceData.description ||
         !serviceData.category || !serviceData.contact_method) {
       res.status(400).json({
         success: false,
         error: 'Missing required fields',
-        required: ['title', 'price', 'description', 'category', 'contact_method']
+        required: ['title', 'description', 'category', 'contact_method']
       });
       return;
     }
 
-    // Validate price (must be positive)
-    if (serviceData.price <= 0) {
+    // A service may have a variable price. When provided, it must be positive.
+    if (serviceData.price !== null && serviceData.price <= 0) {
       res.status(400).json({
         success: false,
         error: 'Price must be greater than 0'
@@ -280,7 +282,11 @@ export const updateExistingService = async (req: AuthRequest, res: Response): Pr
     const updateData: UpdateServiceData = {
       id: serviceId,
       title: req.body.title,
-      price: req.body.price ? parseFloat(req.body.price) : undefined,
+      price: req.body.price === undefined || req.body.price === ''
+        ? undefined
+        : req.body.price === null
+          ? null
+          : parseFloat(req.body.price),
       description: req.body.description,
       category: req.body.category,
       contact_method: req.body.contact_method,
@@ -572,7 +578,8 @@ export const createBookingController = async (req: AuthRequest, res: Response): 
     }
 
     // Use provided budget or service price as fallback
-    const bookingPrice = parseFloat(budget) || service.price;
+    const parsedBudget = parseFloat(budget);
+    const bookingPrice = Number.isFinite(parsedBudget) ? parsedBudget : (service.price ?? 0);
 
     const bookingData: Omit<ServiceBooking, 'id' | 'created_at' | 'updated_at'> = {
       service_id: parseInt(service_id),
