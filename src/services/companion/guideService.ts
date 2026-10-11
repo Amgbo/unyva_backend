@@ -1,5 +1,6 @@
 import {
   createGuide,
+  deleteGuide,
   getAllGuides,
   getGuideById,
   getGuideByStudentId,
@@ -58,5 +59,9 @@ export async function toggleMyAvailability(params: {
   availability_status: 'available' | 'in_class' | 'at_dorm';
 }): Promise<Guide | null> {
   return toggleAvailability(params);
+}
+
+export async function removeGuide(params: { guideId?: string; student_id: string }): Promise<boolean> {
+  return deleteGuide(params);
 }
 

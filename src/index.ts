@@ -37,6 +37,7 @@ import { foundItemsRouter } from './routes/foundItemsRoutes.js';
 import { notificationService } from './services/notificationService.js';
 import { companionRoutes } from './routes/companion/companionRoutes.js';
 import downloadRoutes from './routes/downloadRoutes.js';
+import campusTodayRoutes from './routes/campusTodayRoutes.js';
 import { errorSanitizer } from './middleware/errorSanitizer.js';
 
 
@@ -160,6 +161,7 @@ app.use('/api/deliveries', deliveryRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/announcements', announcementRoutes);
+app.use('/api/campus-today', campusTodayRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api', openProductRoutes);
 app.use('/api', deleteAccountRouter);

@@ -1,4 +1,4 @@
-import { pool } from './db.js';
+import { pool } from './src/db.js';
 
 async function checkDeliveryUsers() {
   try {
@@ -11,7 +11,7 @@ async function checkDeliveryUsers() {
     );
 
     console.log('Delivery users found:', deliveryUsers.rows.length);
-    deliveryUsers.rows.forEach(user => {
+    deliveryUsers.rows.forEach((user: any) => {
       console.log(`- ${user.first_name} ${user.last_name} (${user.student_id}): role=${user.role}, approved=${user.is_delivery_approved}`);
     });
 
@@ -22,7 +22,7 @@ async function checkDeliveryUsers() {
     );
 
     console.log('\nDelivery approved users:', approvedUsers.rows.length);
-    approvedUsers.rows.forEach(user => {
+    approvedUsers.rows.forEach((user: any) => {
       console.log(`- ${user.first_name} ${user.last_name} (${user.student_id}): role=${user.role}, approved=${user.is_delivery_approved}`);
     });
 
@@ -32,7 +32,7 @@ async function checkDeliveryUsers() {
     );
 
     console.log('\nRecent deliveries:', deliveries.rows.length);
-    deliveries.rows.forEach(delivery => {
+    deliveries.rows.forEach((delivery: any) => {
       console.log(`- Delivery ${delivery.id}: assigned to ${delivery.delivery_person_id}, status=${delivery.status}`);
     });
 

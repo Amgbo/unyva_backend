@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authMiddleware } from '../../middleware/authMiddleware.js';
 import {
+  deleteGuideController,
   getGuideByIdController,
   listGuidesController,
   getMyGuideController,
@@ -19,6 +20,8 @@ guideRoutes.get('/guides/me', authMiddleware, getMyGuideController);
 guideRoutes.get('/guides/me/all', authMiddleware, getMyGuidesController);
 guideRoutes.get('/guides/me/dashboard', authMiddleware, getMyDashboardController);
 guideRoutes.put('/guides/me', authMiddleware, updateMyGuideController);
+guideRoutes.delete('/guides/me', authMiddleware, deleteGuideController);
+guideRoutes.delete('/guides/:guideId', authMiddleware, deleteGuideController);
 guideRoutes.patch('/guides/me/availability', authMiddleware, toggleAvailabilityController);
 guideRoutes.get('/guides/:guideId', authMiddleware, getGuideByIdController);
 

@@ -329,3 +329,23 @@ export async function updateGuideRating(guideId: string): Promise<void> {
   );
 }
 
+export async function deleteGuide(params: { guideId?: string; student_id: string }): Promise<boolean> {
+  const { guideId, student_id } = params;
+  if (guideId) {
+    const { rowCount } = await pool.query(
+      `DELETE FROM guides
+       WHERE (id::text = $1 OR student_id = $1)
+         AND student_id = $2`,
+      [guideId, student_id]
+    );
+    return (rowCount ?? 0) > 0;
+  } else {
+    const { rowCount } = await pool.query(
+      `DELETE FROM guides
+       WHERE student_id = $1`,
+      [student_id]
+    );
+    return (rowCount ?? 0) > 0;
+  }
+}
+

@@ -66,4 +66,7 @@ router.put('/reviews/:id', authMiddleware, SellerReviewController.updateReview);
 router.delete('/reviews/:id', authMiddleware, SellerReviewController.deleteReview);
 router.get('/deals/:dealId/can-review', authMiddleware, SellerReviewController.canUserReviewDeal);
 
+// Get student profile by studentId directly (fallback for /api/students/:studentId)
+router.get('/:studentId', getStudentProfileById);
+
 export { router as studentRouter };

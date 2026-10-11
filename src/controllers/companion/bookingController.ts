@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { acceptBooking, cancelBooking, createNewBooking, declineBooking, getBookingDetails, getBookingsForGuide, getMyBookings } from '../../services/companion/bookingService.js';
+import { acceptBooking, cancelBooking, createNewBooking, declineBooking, getBookingDetails, getBookingsForGuide, getMyBookings, updateBooking } from '../../services/companion/bookingService.js';
 import { getGuideById } from '../../models/companion/guideModel.js';
 import { notificationService } from '../../services/notificationService.js';
 import { handleControllerError } from '../../utils/apiError.js';
@@ -198,6 +198,53 @@ export async function cancelBookingController(req: Request, res: Response) {
       statusCode: 400,
       publicError: 'Failed to cancel booking',
       context: 'companion/cancelBooking',
+    });
+  }
+}
+
+export async function updateBookingController(req: Request, res: Response) {
+  try {
+    const student_id = (req as any).student?.student_id || (req as any).user?.student_id;
+    if (!student_id) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { help_category, preferred_date, preferred_time, message } = req.body;
+
+    const booking = await updateBooking({
+      bookingId: req.params.id,
+      userId: student_id,
+      help_category,
+      preferred_date,
+      preferred_time,
+      message,
+    });
+
+    if (!booking) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+
+    // Notify the other party about the update
+    try {
+      const recipientStudentId = String(booking.freshman_id) === String(student_id)
+        ? booking.guide_student_id
+        : booking.freshman_id;
+      if (recipientStudentId) {
+        await notificationService.createCompanionBookingStatusNotification(
+          recipientStudentId,
+          booking.id,
+          'rescheduled',
+          formatStudentName((req as any).student || (req as any).user)
+        );
+      }
+    } catch (notifyError) {
+      console.error('[Companion] Failed to send update notification:', notifyError);
+    }
+
+    return res.json({ booking });
+  } catch (e: any) {
+    return handleControllerError(res, e, {
+      statusCode: 400,
+      publicError: 'Failed to update booking',
+      context: 'companion/updateBooking',
     });
   }
 }

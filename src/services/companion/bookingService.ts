@@ -4,6 +4,7 @@ import {
   getBookingsByFreshmanId,
   getBookingsByGuideId,
   setBookingStatus,
+  updateBookingDetails,
   updateBookingForCompletion,
   type Booking,
   type BookingStatus,
@@ -84,3 +85,32 @@ export async function completeBooking(params: { bookingId: string; completedBy: 
   return updateBookingForCompletion(params);
 }
 
+export async function updateBooking(params: {
+  bookingId: string;
+  userId: string;
+  help_category?: string;
+  preferred_date?: string;
+  preferred_time?: string;
+  message?: string | null;
+}): Promise<any | null> {
+  const booking = await getBookingById(params.bookingId);
+  if (!booking) throw new Error('Booking not found');
+
+  const isFreshman = String(booking.freshman_id) === String(params.userId);
+
+  if (!isFreshman) {
+    throw new Error('Only the student who made this booking can edit it');
+  }
+
+  if (booking.status === 'completed' || booking.status === 'cancelled') {
+    throw new Error(`Cannot edit a booking that is already ${booking.status}`);
+  }
+
+  return updateBookingDetails({
+    bookingId: params.bookingId,
+    help_category: params.help_category,
+    preferred_date: params.preferred_date,
+    preferred_time: params.preferred_time,
+    message: params.message,
+  });
+}

@@ -6,7 +6,12 @@ export class NotificationService {
   private expo: Expo;
 
   constructor() {
-    this.expo = new Expo();
+    const accessToken = process.env.EXPO_ACCESS_TOKEN;
+    if (!accessToken) {
+      console.warn('⚠️ EXPO_ACCESS_TOKEN is not set. Expo push notifications will fail until it is configured.');
+    }
+
+    this.expo = new Expo({ accessToken: accessToken || undefined });
   }
 
   /**
@@ -121,6 +126,7 @@ export class NotificationService {
         to: pushToken as ExpoPushToken,
         title: notification.title,
         body: notification.message,
+        sound: 'default',
         data: (typeof notification.data === 'string' && notification.data.length > 0)
           ? JSON.parse(notification.data)
           : (notification.data || {}),
@@ -762,13 +768,15 @@ export class NotificationService {
   async createCompanionBookingStatusNotification(
     freshmanId: string,
     bookingId: string,
-    status: 'accepted' | 'declined' | 'cancelled',
+    status: 'accepted' | 'declined' | 'cancelled' | 'updated' | 'rescheduled',
     guideName: string
   ): Promise<any> {
     const statusMessages = {
       accepted: `${guideName || 'Your guide'} accepted your booking request`,
       declined: `${guideName || 'Your guide'} declined your booking request`,
-      cancelled: 'Your booking was cancelled'
+      cancelled: 'Your booking was cancelled',
+      updated: `${guideName || 'Your partner'} updated the booking details`,
+      rescheduled: `${guideName || 'Your partner'} updated the booking schedule/details`,
     };
 
     const title = 'Booking Update';
@@ -810,8 +818,9 @@ export class NotificationService {
       message,
       data: {
         booking_id: bookingId,
+        thread_id: bookingId,
         action: 'new_message',
-        screen: 'companion/booking-detail'
+        screen: 'companion/dm-thread'
       },
       priority: 'medium',
       delivery_methods: ['push']

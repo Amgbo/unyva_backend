@@ -261,30 +261,38 @@ export const submitMeasurements = async (req: any, res: Response): Promise<void>
     const createdMeasurements: Measurement[] = [];
     const seenIdempotencyKeys = new Set<string>();
 
+    // Pre-fetch active carriers to validate submitted carrier_ids
+    const activeCarriers = await CarrierModel.findAll(true);
+    const validCarrierIds = new Set(activeCarriers.map(c => c.id));
+
     // Upload path must never call Google per measurement.
-    // Place resolution is deferred to aggregation for unknown clusters.
     for (const measurement of measurements) {
       const resolvedSignalStrength = resolveSignalStrength(
         measurement.signal_strength,
         measurement.signal_quality
       );
 
-      // Validate required fields
+      // Validate required carrier ID against database
+      if (!measurement.carrier_id || !validCarrierIds.has(Number(measurement.carrier_id))) {
+        console.warn(`[SubmitMeasurement] Rejected invalid or inactive carrier_id: ${measurement.carrier_id}`);
+        continue; // Skip measurements with invalid/missing carrier
+      }
+
+      // Validate required signal fields
       if (
-        !measurement.carrier_id ||
         resolvedSignalStrength == null ||
         measurement.signal_quality == null ||
         !measurement.network_type
       ) {
-        continue; // Skip invalid measurements
+        continue;
       }
 
-      // Validate signal strength range
+      // Validate signal strength range (-120 to -50)
       if (resolvedSignalStrength < -120 || resolvedSignalStrength > -50) {
         continue;
       }
 
-      // Validate signal quality range
+      // Validate signal quality range (0 to 100)
       if (measurement.signal_quality < 0 || measurement.signal_quality > 100) {
         continue;
       }
@@ -294,25 +302,27 @@ export const submitMeasurements = async (req: any, res: Response): Promise<void>
         continue;
       }
 
-      // GPS-first: latitude/longitude are required.
+      // GPS validation: latitude (-90 to 90), longitude (-180 to 180)
       const latN = Number(measurement.latitude);
       const lngN = Number(measurement.longitude);
-      if (!Number.isFinite(latN) || !Number.isFinite(lngN)) {
+      if (!Number.isFinite(latN) || !Number.isFinite(lngN) || latN < -90 || latN > 90 || lngN < -180 || lngN > 180) {
+        continue;
+      }
+
+      // Accuracy validation: reject poor accuracy (> 100m or negative/zero)
+      const accuracyN = measurement.accuracy != null ? Number(measurement.accuracy) : null;
+      if (accuracyN != null && (accuracyN > 100 || accuracyN <= 0)) {
+        console.warn(`[SubmitMeasurement] Rejected measurement with poor GPS accuracy: ${accuracyN}m`);
         continue;
       }
 
       try {
-        // Deduplicate within the same batch to avoid duplicate key violations
-        // when the frontend retries rapidly.
         const idempotencyKey = measurement.idempotency_key || `${studentId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
         if (seenIdempotencyKeys.has(idempotencyKey)) {
           continue;
         }
         seenIdempotencyKeys.add(idempotencyKey);
 
-        // Optional PostGIS building/room resolution. This is done locally from
-        // the DB only (no external API calls) so it never blocks or fails the
-        // upload path. If no geometry matches, the measurement remains GPS-only.
         let resolvedBuildingId: number | null = null;
         let resolvedRoomId: number | null = null;
         let placeName: string | null = null;
@@ -328,14 +338,13 @@ export const submitMeasurements = async (req: any, res: Response): Promise<void>
             formattedAddress = resolved.formatted_address;
             googlePlaceId = resolved.google_place_id;
           } catch (resolveError) {
-            // Resolution is best-effort; never fail the upload because of it.
             console.warn('[Hotspot] PostGIS resolution failed for upload:', resolveError);
           }
         }
 
         const created = await MeasurementModel.create({
           user_id: studentId,
-          carrier_id: measurement.carrier_id,
+          carrier_id: Number(measurement.carrier_id),
           device_profile_id: deviceProfile.id!,
           room_id: resolvedRoomId,
           building_id: resolvedBuildingId,
@@ -345,7 +354,7 @@ export const submitMeasurements = async (req: any, res: Response): Promise<void>
           signal_quality: measurement.signal_quality,
           network_type: measurement.network_type as '2G' | '3G' | '4G' | '5G' | 'LTE',
           measurement_timestamp: new Date(measurement.measurement_timestamp || Date.now()),
-          accuracy: measurement.accuracy || null,
+          accuracy: accuracyN,
           upload_status: 'uploaded',
           idempotency_key: idempotencyKey,
           place_name: placeName,
@@ -355,8 +364,6 @@ export const submitMeasurements = async (req: any, res: Response): Promise<void>
 
         createdMeasurements.push(created);
       } catch (measurementError: any) {
-        // If the measurement already exists (e.g. rapid retry), treat it as
-        // already uploaded rather than failing the whole batch.
         if (measurementError?.code === '23505') {
           console.warn('Duplicate measurement idempotency key, skipping:', measurementError?.detail);
           continue;
@@ -367,13 +374,8 @@ export const submitMeasurements = async (req: any, res: Response): Promise<void>
 
     console.log(`✅ Submitted ${createdMeasurements.length} measurements`);
 
-    // GPS-first: trigger a single global aggregation run after any upload.
-    // Never block the response - aggregation happens in the background.
     if (createdMeasurements.length > 0) {
-      // Run aggregation immediately so other users can see the new readings right away,
-      // then queue a follow-up debounced aggregation for any late-arriving measurements.
       aggregationService.aggregateAll().then(async () => {
-        // Diagnostics: ensure coverage summaries got GPS centroids.
         try {
           const diag = await (await import('../db.js')).pool.query(
             `
@@ -400,7 +402,6 @@ export const submitMeasurements = async (req: any, res: Response): Promise<void>
       });
     }
 
-    
     res.status(201).json({
       success: true,
       message: `Successfully uploaded ${createdMeasurements.length} measurements`,
@@ -471,7 +472,6 @@ export const submitSpeedTest = async (req: any, res: Response): Promise<void> =>
 
     const { measurement_id, download_speed, upload_speed, latency, jitter, packet_loss, server_identifier } = req.body;
 
-    // Validate required fields
     if (!measurement_id || download_speed === undefined || upload_speed === undefined || latency === undefined) {
       res.status(400).json({
         success: false,
@@ -480,7 +480,6 @@ export const submitSpeedTest = async (req: any, res: Response): Promise<void> =>
       return;
     }
 
-    // Validate that the measurement exists and belongs to the user
     const measurement = await MeasurementModel.findById(measurement_id);
     
     if (!measurement) {
@@ -499,7 +498,6 @@ export const submitSpeedTest = async (req: any, res: Response): Promise<void> =>
       return;
     }
 
-    // Check if speed test already exists for this measurement
     const existingSpeedTest = await SpeedTestModel.findByMeasurement(measurement_id);
     
     if (existingSpeedTest) {
@@ -510,7 +508,6 @@ export const submitSpeedTest = async (req: any, res: Response): Promise<void> =>
       return;
     }
 
-    // Validate values
     if (download_speed < 0 || upload_speed < 0 || latency < 0) {
       res.status(400).json({
         success: false,
@@ -655,66 +652,136 @@ export const getHeatmapTiles = async (req: Request, res: Response): Promise<void
 // ==================== COMMUNITY (GPS) ENDPOINTS ====================
 
 // GET /api/hotspot/nearby - Get nearby aggregated coverage summaries ranked by GPS distance
-// NOTE: This endpoint is intended to be PUBLIC (no authentication required).
-// If authMiddleware is attached at router level, ensure it doesn't block this handler.
 export const getNearbyCoverageSummaries = async (req: Request, res: Response): Promise<void> => {
-  console.log('🔥 getNearbyCoverageSummaries called');
+  console.log('🔥 getNearbyCoverageSummaries called:', req.query);
   try {
     const { latitude, longitude, radiusMeters, carrier_id } = req.query;
 
     const latN = latitude !== undefined ? Number(latitude) : NaN;
     const lngN = longitude !== undefined ? Number(longitude) : NaN;
-    const radiusN = radiusMeters !== undefined ? Number(radiusMeters) : undefined;
-    const carrierIdN = carrier_id !== undefined ? Number(carrier_id) : undefined;
 
-    if (!Number.isFinite(latN) || !Number.isFinite(lngN)) {
+    // 1. Validate latitude & longitude
+    if (!Number.isFinite(latN) || !Number.isFinite(lngN) || latN < -90 || latN > 90 || lngN < -180 || lngN > 180) {
       res.status(400).json({
         success: false,
-        error: 'latitude and longitude must be valid numbers'
+        error: 'latitude (-90 to 90) and longitude (-180 to 180) must be valid numbers'
       });
       return;
     }
 
+    // 2. Validate radiusMeters if provided
+    let radiusN = 1500;
+    if (radiusMeters !== undefined) {
+      const r = Number(radiusMeters);
+      if (!Number.isFinite(r) || r <= 0 || r > 50000) {
+        res.status(400).json({
+          success: false,
+          error: 'radiusMeters must be a positive number up to 50000'
+        });
+        return;
+      }
+      radiusN = r;
+    }
+
+    // 3. Validate carrier_id if provided
+    let carrierIdN: number | undefined;
+    if (carrier_id !== undefined) {
+      const cId = Number(carrier_id);
+      if (!Number.isFinite(cId) || cId <= 0) {
+        res.status(400).json({
+          success: false,
+          error: 'carrier_id must be a valid positive integer'
+        });
+        return;
+      }
+
+      const carrierRecord = await CarrierModel.findById(cId);
+      if (!carrierRecord || !carrierRecord.is_active) {
+        res.status(400).json({
+          success: false,
+          error: `Carrier ID ${cId} is invalid or inactive`
+        });
+        return;
+      }
+      carrierIdN = cId;
+    }
+
+    // Fetch nearby coverage summaries (max age 7 days for live recommendations)
     const nearby = await CoverageSummaryModel.findNearby({
       latitude: latN,
       longitude: lngN,
-      radiusMeters: radiusN !== undefined && Number.isFinite(radiusN) ? radiusN : undefined,
-      carrierId: carrierIdN !== undefined && Number.isFinite(carrierIdN) ? carrierIdN : undefined,
+      radiusMeters: radiusN,
+      carrierId: carrierIdN,
+      maxAgeDays: 7,
       limit: 20,
     });
 
-    // Read-time fallback: if aggregation hasn't persisted Google labels yet,
-    // resolve for returned rows so frontend shows real place names.
+    const now = Date.now();
+
+    // Enrich nearby results with location resolution and freshness metadata
     const enrichedNearby = await Promise.all(
       nearby.map(async (row: any) => {
+        let placeName = row.place_name;
+        let formattedAddress = row.formatted_address;
+        let googlePlaceId = row.google_place_id;
+
         const hasLabel =
-          (row.place_name && String(row.place_name).trim().length > 0) ||
-          (row.formatted_address && String(row.formatted_address).trim().length > 0);
+          (placeName && String(placeName).trim().length > 0) ||
+          (formattedAddress && String(formattedAddress).trim().length > 0);
 
-        if (hasLabel) return row;
-
-        const lat = Number(row.average_latitude);
-        const lng = Number(row.average_longitude);
-        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-          return row;
+        if (!hasLabel) {
+          const lat = Number(row.average_latitude);
+          const lng = Number(row.average_longitude);
+          if (Number.isFinite(lat) && Number.isFinite(lng)) {
+            try {
+              const resolved = await resolveLocation(lat, lng);
+              placeName = resolved.place_name ?? null;
+              formattedAddress = resolved.formatted_address ?? null;
+              googlePlaceId = resolved.google_place_id ?? null;
+            } catch {
+              // Resolution is best effort
+            }
+          }
         }
 
-        try {
-          const resolved = await resolveLocation(lat, lng);
-          return {
-            ...row,
-            place_name: resolved.place_name ?? row.place_name ?? null,
-            formatted_address: resolved.formatted_address ?? row.formatted_address ?? null,
-            google_place_id: resolved.google_place_id ?? row.google_place_id ?? null,
-          };
-        } catch {
-          return row;
-        }
+        // Calculate freshness metadata
+        const lastTimeIso = row.last_measurement_at || row.last_updated;
+        const lastTimestamp = lastTimeIso ? new Date(lastTimeIso).getTime() : now;
+        const ageSeconds = Math.max(0, Math.floor((now - lastTimestamp) / 1000));
+
+        let freshnessState: 'fresh' | 'recent' | 'today' | 'older' | 'historical' = 'fresh';
+        if (ageSeconds > 604800) freshnessState = 'historical';
+        else if (ageSeconds > 86400) freshnessState = 'older';
+        else if (ageSeconds > 3600) freshnessState = 'today';
+        else if (ageSeconds > 600) freshnessState = 'recent';
+
+        // Sample count confidence label
+        const count = Number(row.measurement_count || 0);
+        let confidenceLabel = 'Normal';
+        if (count <= 1) confidenceLabel = 'Initial report';
+        else if (count <= 4) confidenceLabel = 'Limited data';
+
+        return {
+          ...row,
+          place_name: placeName,
+          formatted_address: formattedAddress,
+          google_place_id: googlePlaceId,
+          data_age_seconds: ageSeconds,
+          freshness_state: freshnessState,
+          is_historical: ageSeconds > 604800,
+          confidence_label: confidenceLabel,
+        };
       })
     );
 
     res.status(200).json({
       success: true,
+      query: {
+        latitude: latN,
+        longitude: lngN,
+        radius_meters: radiusN,
+        carrier_id: carrierIdN || null,
+      },
       nearby: enrichedNearby
     });
   } catch (err: any) {
@@ -726,6 +793,7 @@ export const getNearbyCoverageSummaries = async (req: Request, res: Response): P
     });
   }
 };
+
 
 
 

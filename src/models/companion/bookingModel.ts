@@ -45,25 +45,61 @@ export async function createBooking(params: {
   return rows[0] as Booking;
 }
 
-export async function getBookingById(id: string): Promise<Booking | null> {
-  const { rows } = await pool.query(`SELECT * FROM bookings WHERE id = $1;`, [id]);
+export async function getBookingById(id: string): Promise<any | null> {
+  const { rows } = await pool.query(
+    `SELECT 
+      b.*,
+      g.student_id AS guide_student_id,
+      sf.first_name AS freshman_first_name,
+      sf.last_name AS freshman_last_name,
+      sf.profile_picture AS freshman_profile_picture,
+      sg.first_name AS guide_first_name,
+      sg.last_name AS guide_last_name,
+      sg.profile_picture AS guide_profile_picture
+    FROM bookings b
+    LEFT JOIN guides g ON b.guide_id = g.id
+    LEFT JOIN students sf ON b.freshman_id = sf.student_id
+    LEFT JOIN students sg ON g.student_id = sg.student_id
+    WHERE b.id = $1;`,
+    [id]
+  );
   return rows[0] ?? null;
 }
 
-export async function getBookingsByFreshmanId(freshmanId: string): Promise<Booking[]> {
+export async function getBookingsByFreshmanId(freshmanId: string): Promise<any[]> {
   const { rows } = await pool.query(
-    `SELECT * FROM bookings WHERE freshman_id = $1 ORDER BY created_at DESC;`,
+    `SELECT 
+      b.*,
+      g.student_id AS guide_student_id,
+      sg.first_name AS guide_first_name,
+      sg.last_name AS guide_last_name,
+      sg.profile_picture AS guide_profile_picture
+    FROM bookings b
+    LEFT JOIN guides g ON b.guide_id = g.id
+    LEFT JOIN students sg ON g.student_id = sg.student_id
+    WHERE b.freshman_id = $1
+    ORDER BY b.created_at DESC;`,
     [freshmanId]
   );
-  return rows as Booking[];
+  return rows;
 }
 
-export async function getBookingsByGuideId(guideId: string): Promise<Booking[]> {
+export async function getBookingsByGuideId(guideId: string): Promise<any[]> {
   const { rows } = await pool.query(
-    `SELECT * FROM bookings WHERE guide_id = $1 ORDER BY created_at DESC;`,
+    `SELECT 
+      b.*,
+      g.student_id AS guide_student_id,
+      sf.first_name AS freshman_first_name,
+      sf.last_name AS freshman_last_name,
+      sf.profile_picture AS freshman_profile_picture
+    FROM bookings b
+    LEFT JOIN guides g ON b.guide_id = g.id
+    LEFT JOIN students sf ON b.freshman_id = sf.student_id
+    WHERE b.guide_id = $1
+    ORDER BY b.created_at DESC;`,
     [guideId]
   );
-  return rows as Booking[];
+  return rows;
 }
 
 export async function setBookingStatus(params: {
@@ -143,5 +179,52 @@ export async function updateBookingForCompletion(params: {
     [bookingId]
   );
   return rows[0] ?? null;
+}
+
+export async function updateBookingDetails(params: {
+  bookingId: string;
+  help_category?: string;
+  preferred_date?: string;
+  preferred_time?: string;
+  message?: string | null;
+}): Promise<any | null> {
+  const { bookingId, help_category, preferred_date, preferred_time, message } = params;
+
+  const updates: string[] = [];
+  const values: any[] = [];
+
+  if (help_category !== undefined) {
+    values.push(help_category);
+    updates.push(`help_category = $${values.length}`);
+  }
+  if (preferred_date !== undefined) {
+    values.push(preferred_date);
+    updates.push(`preferred_date = $${values.length}`);
+  }
+  if (preferred_time !== undefined) {
+    values.push(preferred_time);
+    updates.push(`preferred_time = $${values.length}`);
+  }
+  if (message !== undefined) {
+    values.push(message);
+    updates.push(`message = $${values.length}`);
+  }
+
+  if (updates.length === 0) {
+    return getBookingById(bookingId);
+  }
+
+  updates.push(`updated_at = NOW()`);
+  values.push(bookingId);
+  const q = `
+    UPDATE bookings
+    SET ${updates.join(', ')}
+    WHERE id = $${values.length}
+    RETURNING id;
+  `;
+
+  const { rows } = await pool.query(q, values);
+  if (rows.length === 0) return null;
+  return getBookingById(bookingId);
 }
 

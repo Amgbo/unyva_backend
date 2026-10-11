@@ -780,12 +780,15 @@ export class CoverageSummaryModel {
     longitude: number;
     radiusMeters?: number;
     carrierId?: number;
+    maxAgeDays?: number;
     limit?: number;
   }): Promise<NearbyCoverageSummary[]> {
-    const { latitude, longitude, radiusMeters = 1500, carrierId, limit = 20 } = params;
+    const { latitude, longitude, radiusMeters = 1500, carrierId, maxAgeDays = 7, limit = 20 } = params;
 
     const limitParamIndex = carrierId ? 4 : 3;
     const carrierFilter = carrierId ? 'AND cs.carrier_id = $3' : '';
+    const ageFilter = maxAgeDays > 0 ? `AND (cs.last_measurement_at IS NULL OR cs.last_measurement_at >= NOW() - INTERVAL '${maxAgeDays} days')` : '';
+
     const query = `
       SELECT
         cs.*,
@@ -802,6 +805,7 @@ export class CoverageSummaryModel {
       FROM hotspot_coverage_summary cs
       LEFT JOIN hotspot_carriers c ON c.id = cs.carrier_id
       WHERE cs.measurement_count > 0
+        ${ageFilter}
         AND (
           (cs.average_latitude IS NOT NULL AND cs.average_longitude IS NOT NULL)
           OR (
@@ -825,7 +829,7 @@ export class CoverageSummaryModel {
           )
         )
         ${carrierFilter}
-      ORDER BY distance_meters ASC NULLS LAST
+      ORDER BY distance_meters ASC NULLS LAST, cs.reliability_score DESC NULLS LAST, cs.confidence_score DESC NULLS LAST
       LIMIT $${limitParamIndex}
     `;
 
@@ -853,12 +857,11 @@ export class CoverageSummaryModel {
       let formatted_address: string | null = row.formatted_address ?? null;
       let google_place_id: string | null = row.google_place_id ?? null;
 
-      if (!place_name && row.average_latitude != null && row.average_longitude != null) {
+      if (row.average_latitude != null && row.average_longitude != null) {
         const placeQuery = `
-          SELECT place_name, formatted_address, google_place_id
+          SELECT latitude, longitude, place_name, formatted_address, google_place_id
           FROM hotspot_measurements
           WHERE carrier_id = $1
-            AND place_name IS NOT NULL
             AND latitude IS NOT NULL
             AND longitude IS NOT NULL
             AND (
@@ -879,6 +882,9 @@ export class CoverageSummaryModel {
           row.average_longitude,
         ]);
         if (r.rows[0]) {
+          // Prefer the latest raw GPS reading over a stale cluster label.
+          row.average_latitude = Number(r.rows[0].latitude);
+          row.average_longitude = Number(r.rows[0].longitude);
           place_name = r.rows[0].place_name;
           formatted_address = r.rows[0].formatted_address;
           google_place_id = r.rows[0].google_place_id;

@@ -7,6 +7,7 @@ import {
   getMyGuides,
   updateMyGuide,
   toggleMyAvailability,
+  removeGuide,
 } from '../../services/companion/guideService.js';
 import { handleControllerError } from '../../utils/apiError.js';
 
@@ -106,21 +107,32 @@ export async function getMyDashboardController(req: Request, res: Response) {
     const guides = await getMyGuides(student_id);
     const guideIds = guides.map((g) => g.id);
 
-    // Aggregate pending bookings across all of the student's guides.
+    // Show both requests received by the student's guides and bookings ordered
+    // by the student, including bookings made with other guides.
     const { pool } = await import('../../db.js');
-    let bookings: any[] = [];
-    if (guideIds.length > 0) {
-      const placeholders = guideIds.map((_, i) => `$${i + 1}`).join(',');
-      const result = await pool.query(
-        `SELECT b.*, s.first_name, s.last_name
-         FROM bookings b
-         LEFT JOIN students s ON s.student_id = b.freshman_id
-         WHERE b.guide_id IN (${placeholders})
-         ORDER BY b.created_at DESC;`,
-        guideIds
-      );
-      bookings = result.rows;
-    }
+    const guidePlaceholders = guideIds.map((_, i) => `$${i + 2}`).join(',');
+    const bookingScope = guideIds.length > 0
+      ? `b.freshman_id = $1 OR b.guide_id IN (${guidePlaceholders})`
+      : 'b.freshman_id = $1';
+    const result = await pool.query(
+      `SELECT
+         b.*,
+         g.student_id AS guide_student_id,
+         sf.first_name AS freshman_first_name,
+         sf.last_name AS freshman_last_name,
+         sf.profile_picture AS freshman_profile_picture,
+         sg.first_name AS guide_first_name,
+         sg.last_name AS guide_last_name,
+         sg.profile_picture AS guide_profile_picture
+       FROM bookings b
+       LEFT JOIN guides g ON g.id = b.guide_id
+       LEFT JOIN students sf ON sf.student_id = b.freshman_id
+       LEFT JOIN students sg ON sg.student_id = g.student_id
+       WHERE ${bookingScope}
+       ORDER BY b.created_at DESC;`,
+      [student_id, ...guideIds]
+    );
+    const bookings = result.rows;
 
     // Compute unread message counts for each booking thread.
     const bookingIds = bookings.map((b) => b.id);
@@ -243,6 +255,28 @@ export async function getGuideByIdController(req: Request, res: Response) {
       statusCode: 400,
       publicError: 'Failed to get guide',
       context: 'companion/getGuideById',
+    });
+  }
+}
+
+export async function deleteGuideController(req: Request, res: Response) {
+  try {
+    const student_id = (req as any).user?.student_id || (req as any).student?.student_id;
+    if (!student_id) return res.status(401).json({ error: 'Unauthorized' });
+
+    const guideId = req.params.guideId || req.body?.guide_id;
+    const deleted = await removeGuide({ guideId, student_id });
+
+    if (!deleted) {
+      return res.status(404).json({ error: 'Guide profile not found or already deleted' });
+    }
+
+    return res.json({ success: true, message: 'Guide profile deleted successfully' });
+  } catch (e: any) {
+    return handleControllerError(res, e, {
+      statusCode: 400,
+      publicError: 'Failed to delete guide profile',
+      context: 'companion/deleteGuide',
     });
   }
 }
