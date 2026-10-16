@@ -7,6 +7,7 @@ import {
   getMyGuideController,
   getMyGuidesController,
   getMyDashboardController,
+  getCompanionBadgeController,
   registerGuideController,
   toggleAvailabilityController,
   updateMyGuideController,
@@ -14,6 +15,8 @@ import {
 
 export const guideRoutes = Router();
 
+guideRoutes.get('/badge', authMiddleware, getCompanionBadgeController);
+guideRoutes.get('/guides/me/badge', authMiddleware, getCompanionBadgeController);
 guideRoutes.post('/guides/register', authMiddleware, registerGuideController);
 guideRoutes.get('/guides', listGuidesController);
 guideRoutes.get('/guides/me', authMiddleware, getMyGuideController);

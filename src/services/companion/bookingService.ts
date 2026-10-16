@@ -1,5 +1,6 @@
 import {
   createBooking,
+  deleteBooking,
   getBookingById,
   getBookingsByFreshmanId,
   getBookingsByGuideId,
@@ -78,6 +79,15 @@ export async function cancelBooking(params: { bookingId: string; freshman_id: st
   if (!booking) return null;
   assertStatus(booking.status, ['pending', 'accepted']);
   return setBookingStatus({ bookingId: params.bookingId, status: 'cancelled', freshmanId: params.freshman_id });
+}
+
+export async function removeBooking(params: { bookingId: string; freshman_id: string }): Promise<Booking | null> {
+  const booking = await getBookingById(params.bookingId);
+  if (!booking) return null;
+  if (String(booking.freshman_id) !== String(params.freshman_id)) {
+    throw new Error('Only the student who made this booking can delete it');
+  }
+  return deleteBooking({ bookingId: params.bookingId, freshmanId: params.freshman_id });
 }
 
 export async function completeBooking(params: { bookingId: string; completedBy: string }): Promise<Booking | null> {

@@ -6,10 +6,11 @@ import { deleteLocalFile, getLocalUrl } from '../config/multer.js';
 const CATEGORIES = ['events', 'item13', 'deals', 'announcements', 'opportunities', 'sports'] as const;
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
 
-const isAdmin = (req: any) => req.user?.student_id === '22243185';
+const isAdmin = (req: any) => req.user?.student_id === '22243185' || req.user?.role === 'admin';
 const asBoolean = (value: unknown) => value === true || value === 'true' || value === 1 || value === '1';
 const clean = (value: unknown) => typeof value === 'string' ? value.trim() : value;
 const validDate = (value: unknown) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`));
+const todayIsoDate = () => new Date().toISOString().slice(0, 10);
 
 const removeImage = async (url: string | null) => {
   if (!url) return;
@@ -38,12 +39,27 @@ const uploadImage = async (req: any): Promise<string | null> => {
   return getLocalUrl('campus_today', req.file.filename || req.file.originalname);
 };
 
+const cleanDate = (value: unknown) => {
+  if (typeof value !== 'string') return value;
+  const str = value.trim();
+  if (str.includes('T')) return str.split('T')[0];
+  return str;
+};
+
+const SELECT_FIELDS = `
+  id, title, description, category, image_url,
+  TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date,
+  event_time, location, organizer, is_featured, is_pinned,
+  created_by, created_at, updated_at
+`;
+
 const validatePayload = (body: any, partial = false) => {
+  const rawDate = body.event_date ?? body.date ?? (body.category === 'announcements' || !body.category ? todayIsoDate() : undefined);
   const values = {
     title: clean(body.title),
-    description: clean(body.description),
-    category: clean(body.category),
-    event_date: clean(body.event_date ?? body.date),
+    description: clean(body.description ?? body.content),
+    category: clean(body.category ?? 'announcements'),
+    event_date: clean(cleanDate(rawDate)),
     event_time: clean(body.event_time),
     location: clean(body.location),
     organizer: clean(body.organizer),
@@ -77,7 +93,7 @@ export const getCampusToday = async (req: Request, res: Response): Promise<void>
     }
     if (!includeExpired) where += `${where ? ' AND' : 'WHERE'} event_date >= CURRENT_DATE - INTERVAL '30 days'`;
     const result = await pool.query(
-      `SELECT * FROM campus_today ${where}
+      `SELECT ${SELECT_FIELDS} FROM campus_today ${where}
        ORDER BY is_pinned DESC, is_featured DESC,
          CASE WHEN event_date = CURRENT_DATE THEN 0 WHEN event_date > CURRENT_DATE THEN 1 ELSE 2 END,
          CASE WHEN event_date >= CURRENT_DATE THEN event_date END ASC NULLS LAST,
@@ -93,7 +109,7 @@ export const getCampusToday = async (req: Request, res: Response): Promise<void>
 
 export const getCampusTodayById = async (req: Request, res: Response): Promise<void> => {
   try {
-    const result = await pool.query('SELECT * FROM campus_today WHERE id = $1', [req.params.id]);
+    const result = await pool.query(`SELECT ${SELECT_FIELDS} FROM campus_today WHERE id = $1`, [req.params.id]);
     if (!result.rows.length) {
       res.status(404).json({ error: 'Campus Today post not found' });
       return;
@@ -112,15 +128,17 @@ export const createCampusToday = async (req: any, res: Response): Promise<void> 
     if (validation.error) { res.status(400).json({ error: validation.error }); return; }
     const values = validation.values!;
     const imageUrl = await uploadImage(req);
+    const createdBy = req.user?.student_id || req.user?.id || '22243185';
     const result = await pool.query(
       `INSERT INTO campus_today
        (title, description, category, image_url, event_date, event_time, location, organizer, is_featured, is_pinned, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-      [values.title, values.description, values.category, imageUrl, values.event_date, values.event_time || null, values.location || null, values.organizer || null, asBoolean(req.body.is_featured), asBoolean(req.body.is_pinned), req.user.student_id]
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING ${SELECT_FIELDS}`,
+      [values.title, values.description, values.category, imageUrl, values.event_date, values.event_time || null, values.location || null, values.organizer || null, asBoolean(req.body.is_featured), asBoolean(req.body.is_pinned), createdBy]
     );
     res.status(201).json({ success: true, post: result.rows[0] });
   } catch (error: any) {
-    res.status(error.message.includes('File size') ? 400 : 500).json({ error: error.message || 'Failed to create Campus Today post' });
+    console.error('Create Campus Today Error:', error);
+    res.status(error.message?.includes('File size') ? 400 : 500).json({ error: error.message || 'Failed to create Campus Today post' });
   }
 };
 
@@ -134,19 +152,23 @@ export const updateCampusToday = async (req: any, res: Response): Promise<void> 
     const old = current.rows[0];
     const values = validation.values!;
     const imageUrl = req.file ? await uploadImage(req) : old.image_url;
+    const finalEventTime = values.event_time !== undefined ? (values.event_time || null) : old.event_time;
+    const finalLocation = values.location !== undefined ? (values.location || null) : old.location;
+    const finalOrganizer = values.organizer !== undefined ? (values.organizer || null) : old.organizer;
     const result = await pool.query(
       `UPDATE campus_today SET title=$1, description=$2, category=$3, image_url=$4, event_date=$5,
        event_time=$6, location=$7, organizer=$8, is_featured=$9, is_pinned=$10, updated_at=CURRENT_TIMESTAMP
-       WHERE id=$11 RETURNING *`,
+       WHERE id=$11 RETURNING ${SELECT_FIELDS}`,
       [values.title ?? old.title, values.description ?? old.description, values.category ?? old.category, imageUrl,
-        values.event_date ?? old.event_date, values.event_time ?? old.event_time, values.location ?? old.location,
-        values.organizer ?? old.organizer, req.body.is_featured === undefined ? old.is_featured : asBoolean(req.body.is_featured),
+        values.event_date ?? old.event_date, finalEventTime, finalLocation,
+        finalOrganizer, req.body.is_featured === undefined ? old.is_featured : asBoolean(req.body.is_featured),
         req.body.is_pinned === undefined ? old.is_pinned : asBoolean(req.body.is_pinned), req.params.id]
     );
     if (req.file && old.image_url && old.image_url !== imageUrl) await removeImage(old.image_url);
     res.json({ success: true, post: result.rows[0] });
   } catch (error: any) {
-    res.status(error.message.includes('File size') ? 400 : 500).json({ error: error.message || 'Failed to update Campus Today post' });
+    console.error('Update Campus Today Error:', error);
+    res.status(error.message?.includes('File size') ? 400 : 500).json({ error: error.message || 'Failed to update Campus Today post' });
   }
 };
 

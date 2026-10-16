@@ -85,14 +85,15 @@ export const addAnnouncement = async (req: any, res: Response): Promise<void> =>
   try {
     console.log('📢 Adding new announcement...');
 
-    const { title, content } = req.body;
+    const { title, description, content } = req.body;
+    const announcementContent = typeof description === 'string' ? description : content;
     const studentId = req.user?.student_id;
     let imageUrl: string | null = null;
 
     // Validate required fields
-    if (!title || !content) {
+    if (!title || !announcementContent) {
       res.status(400).json({
-        error: 'Title and content are required'
+        error: 'Title and description are required'
       });
       return;
     }
@@ -142,7 +143,7 @@ export const addAnnouncement = async (req: any, res: Response): Promise<void> =>
     // Insert into database
     const result = await pool.query(
       'INSERT INTO announcements (title, content, created_by, image_url) VALUES ($1, $2, $3, $4) RETURNING *',
-      [title, content, studentId, imageUrl]
+      [title, announcementContent, studentId, imageUrl]
     );
 
     console.log('✅ Announcement added successfully');

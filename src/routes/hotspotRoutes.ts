@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middleware/authMiddleware.js';
+import { hotspotFeatureGuard } from '../middleware/hotspotFeatureGuard.js';
 import {
   getPublicConfig,
   getCampuses,
@@ -20,6 +21,9 @@ import {
 import { debugNearby } from '../controllers/hotspotDebugController.js';
 
 const router = Router();
+
+// Guard all Hotspot routes: reject requests with 503 when feature is disabled
+router.use(hotspotFeatureGuard);
 
 // ==================== PUBLIC ENDPOINTS ====================
 

@@ -164,6 +164,21 @@ export async function setBookingStatus(params: {
   return rows[0] ?? null;
 }
 
+export async function deleteBooking(params: {
+  bookingId: string;
+  freshmanId: string;
+}): Promise<Booking | null> {
+  await pool.query('DELETE FROM companion_messages WHERE booking_id = $1', [params.bookingId]);
+
+  const { rows } = await pool.query(
+    `DELETE FROM bookings
+     WHERE id = $1 AND freshman_id = $2
+     RETURNING *;`,
+    [params.bookingId, params.freshmanId]
+  );
+  return rows[0] ?? null;
+}
+
 export async function updateBookingForCompletion(params: {
   bookingId: string;
   completedBy: string; // not stored but used for auth/logic
@@ -227,4 +242,3 @@ export async function updateBookingDetails(params: {
   if (rows.length === 0) return null;
   return getBookingById(bookingId);
 }
-

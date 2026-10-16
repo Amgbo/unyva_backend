@@ -180,6 +180,47 @@ export async function getMyDashboardController(req: Request, res: Response) {
   }
 }
 
+export async function getCompanionBadgeController(req: Request, res: Response) {
+  try {
+    const student_id = (req as any).student?.student_id || (req as any).user?.student_id;
+    if (!student_id) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { pool } = await import('../../db.js');
+    const result = await pool.query(
+      `SELECT 
+        EXISTS(
+          SELECT 1 FROM companion_messages 
+          WHERE receiver_id = $1 AND is_read = false
+        ) AS has_unread,
+        EXISTS(
+          SELECT 1 FROM bookings b
+          WHERE (
+            b.freshman_id = $1 
+            OR b.guide_id IN (SELECT id FROM guides WHERE student_id = $1)
+          ) AND b.status = 'pending'
+        ) AS has_pending;`,
+      [student_id]
+    );
+
+    const row = result.rows[0] || {};
+    const hasUnread = Boolean(row.has_unread);
+    const hasPending = Boolean(row.has_pending);
+    const hasBadge = hasUnread || hasPending;
+
+    return res.json({
+      hasBadge,
+      hasUnread,
+      hasPending,
+    });
+  } catch (e: any) {
+    return handleControllerError(res, e, {
+      statusCode: 400,
+      publicError: 'Failed to get companion badge status',
+      context: 'companion/getCompanionBadge',
+    });
+  }
+}
+
 export async function updateMyGuideController(req: Request, res: Response) {
   try {
     const student_id = (req as any).student?.student_id || (req as any).user?.student_id;

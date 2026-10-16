@@ -17,6 +17,7 @@
 import aggregationService from './aggregationService.js';
 import { aggregationConfig } from '../config/aggregationConfig.js';
 import { heatmapService } from './heatmapService.js';
+import { isHotspotEnabled } from '../config/features.js';
 
 // ==================== TYPES ====================
 
@@ -79,6 +80,10 @@ export class MemoryAggregationQueue implements IAggregationQueue {
    * If a request for the same building already exists, update its timestamp.
    */
   add(request: AggregationRequest): void {
+    if (!isHotspotEnabled()) {
+      return;
+    }
+
     if (this.isShuttingDown) {
       console.log('[AggregationQueue] Queue is shutting down, ignoring request');
       return;

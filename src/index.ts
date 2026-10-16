@@ -26,6 +26,8 @@ import notificationRoutes from './routes/notificationRoutes.js';
 import paymentRoutes from './routes/paymentRoutes.js';
 import openProductRoutes from './routes/openProductRoutes.js';
 import hotspotRoutes from './routes/hotspotRoutes.js';
+import { isHotspotEnabled } from './config/features.js';
+import { hotspotFeatureGuard } from './middleware/hotspotFeatureGuard.js';
 import { deleteAccountRouter } from './routes/deleteAccountRoutes.js';
 import messageRoutes from './routes/messageRoutes.js';
 import behaviorRoutes from './routes/behaviorRoutes.js';
@@ -174,13 +176,16 @@ app.use('/api/leaderboard', leaderboardRoutes);
 app.use('/api/found-items', foundItemsRouter);
 console.log('✅ Found Items routes registered at /api/found-items');
 
+const hotspotActive = isHotspotEnabled();
+console.log(`📡 Hotspot feature status: ${hotspotActive ? 'ENABLED' : 'DISABLED (Protected via hotspotFeatureGuard)'}`);
+
+app.use('/api/hotspot', hotspotFeatureGuard);
 app.use('/api/hotspot', (req, _res, next) => {
   console.log(`📡 [hotspot] ${req.method} ${req.originalUrl}`);
   next();
 });
 app.use('/api/hotspot', hotspotRoutes);
-console.log('✅ Hotspot routes registered at /api/hotspot (includes GET /api/hotspot/nearby)');
-console.log('🧭 Hotspot router mounted (handlers may be protected by authMiddleware)');
+console.log('✅ Hotspot routes registered at /api/hotspot (guarded by hotspotFeatureGuard)');
 
 
 

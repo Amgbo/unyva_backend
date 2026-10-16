@@ -5,6 +5,7 @@ import {
   cancelBookingController,
   createBookingController,
   declineBookingController,
+  deleteBookingController,
   getBookingDetailController,
   listBookingsForGuideController,
   listMyBookingsController,
@@ -21,4 +22,4 @@ bookingRoutes.patch('/bookings/:id', authMiddleware, updateBookingController);
 bookingRoutes.patch('/bookings/:id/accept', authMiddleware, acceptBookingController);
 bookingRoutes.patch('/bookings/:id/decline', authMiddleware, declineBookingController);
 bookingRoutes.patch('/bookings/:id/cancel', authMiddleware, cancelBookingController);
-
+bookingRoutes.delete('/bookings/:id', authMiddleware, deleteBookingController);

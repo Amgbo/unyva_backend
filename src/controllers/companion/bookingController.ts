@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { acceptBooking, cancelBooking, createNewBooking, declineBooking, getBookingDetails, getBookingsForGuide, getMyBookings, updateBooking } from '../../services/companion/bookingService.js';
+import { acceptBooking, cancelBooking, createNewBooking, declineBooking, getBookingDetails, getBookingsForGuide, getMyBookings, removeBooking, updateBooking } from '../../services/companion/bookingService.js';
 import { getGuideById } from '../../models/companion/guideModel.js';
 import { notificationService } from '../../services/notificationService.js';
 import { handleControllerError } from '../../utils/apiError.js';
@@ -198,6 +198,41 @@ export async function cancelBookingController(req: Request, res: Response) {
       statusCode: 400,
       publicError: 'Failed to cancel booking',
       context: 'companion/cancelBooking',
+    });
+  }
+}
+
+export async function deleteBookingController(req: Request, res: Response) {
+  try {
+    const freshman_id = (req as any).student?.student_id || (req as any).user?.student_id || (req as any).user?.id;
+    if (!freshman_id) return res.status(401).json({ error: 'Unauthorized' });
+
+    const booking = await removeBooking({ bookingId: req.params.id, freshman_id });
+    if (!booking) return res.status(404).json({ error: 'Booking not found' });
+
+    // If deleted while pending or accepted, inform the guide that the booking was removed/cancelled
+    if (booking.guide_id && (booking.status === 'pending' || booking.status === 'accepted')) {
+      try {
+        const guide = await getGuideById(booking.guide_id);
+        if (guide?.student_id) {
+          await notificationService.createCompanionBookingStatusNotification(
+            guide.student_id,
+            booking.id,
+            'cancelled',
+            formatStudentName(req as any)
+          );
+        }
+      } catch (notifyError) {
+        console.error('[Companion] Failed to send delete notification to guide:', notifyError);
+      }
+    }
+
+    return res.json({ success: true, booking });
+  } catch (e: any) {
+    return handleControllerError(res, e, {
+      statusCode: 400,
+      publicError: 'Failed to delete booking',
+      context: 'companion/deleteBooking',
     });
   }
 }
