@@ -10,15 +10,11 @@ import {
 } from '../../services/companion/companionMessageService.js';
 import { notificationService } from '../../services/notificationService.js';
 import { handleControllerError } from '../../utils/apiError.js';
+import { getStudentDisplayName } from '../../utils/studentName.js';
 
 export function buildDirectThreadId(a: string, b: string): string {
   const [x, y] = [String(a), String(b)].sort();
   return `dm:${x}:${y}`;
-}
-
-function formatStudentName(student: any): string {
-  const full = [student?.first_name, student?.last_name].filter(Boolean).join(' ').trim();
-  return full || `@${student?.student_id}` || 'Someone';
 }
 
 export async function sendMessageController(req: Request, res: Response) {
@@ -126,7 +122,7 @@ export async function sendMessageController(req: Request, res: Response) {
     try {
       await notificationService.createCompanionMessageNotification(
         receiver_id,
-        formatStudentName((req as any).user || (req as any).student),
+        await getStudentDisplayName(sender_id),
         threadId,
         content.trim()
       );

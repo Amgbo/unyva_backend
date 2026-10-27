@@ -3,11 +3,7 @@ import { getGuideReviews, submitGuideReview } from '../../services/companion/rev
 import { getGuideById } from '../../models/companion/guideModel.js';
 import { notificationService } from '../../services/notificationService.js';
 import { handleControllerError } from '../../utils/apiError.js';
-
-function formatStudentName(student: any): string {
-  const full = [student?.first_name, student?.last_name].filter(Boolean).join(' ').trim();
-  return full || `@${student?.student_id}` || 'A student';
-}
+import { getStudentDisplayName } from '../../utils/studentName.js';
 
 export async function submitReviewController(req: Request, res: Response) {
   try {
@@ -30,7 +26,7 @@ export async function submitReviewController(req: Request, res: Response) {
           guide.student_id,
           guide.id,
           Number(req.body.rating),
-          formatStudentName(req as any)
+          await getStudentDisplayName(reviewer_id, 'A student')
         );
       }
     } catch (notifyError) {

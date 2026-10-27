@@ -3,11 +3,7 @@ import { acceptBooking, cancelBooking, createNewBooking, declineBooking, getBook
 import { getGuideById } from '../../models/companion/guideModel.js';
 import { notificationService } from '../../services/notificationService.js';
 import { handleControllerError } from '../../utils/apiError.js';
-
-function formatStudentName(student: any): string {
-  const full = [student?.first_name, student?.last_name].filter(Boolean).join(' ').trim();
-  return full || `@${student?.student_id}` || 'A student';
-}
+import { getStudentDisplayName } from '../../utils/studentName.js';
 
 export async function createBookingController(req: Request, res: Response) {
   try {
@@ -30,7 +26,7 @@ export async function createBookingController(req: Request, res: Response) {
         await notificationService.createCompanionBookingRequestNotification(
           guide.student_id,
           booking.id,
-          formatStudentName(req as any),
+          await getStudentDisplayName(freshman_id, 'A student'),
           booking.help_category
         );
       }
@@ -122,7 +118,7 @@ export async function acceptBookingController(req: Request, res: Response) {
           booking.freshman_id,
           booking.id,
           'accepted',
-          formatStudentName(req as any)
+          await getStudentDisplayName(student_id, 'Your guide')
         );
       } catch (notifyError) {
         console.error('[Companion] Failed to send accept notification:', notifyError);
@@ -152,7 +148,7 @@ export async function declineBookingController(req: Request, res: Response) {
           booking.freshman_id,
           booking.id,
           'declined',
-          formatStudentName(req as any)
+          await getStudentDisplayName(student_id, 'Your guide')
         );
       } catch (notifyError) {
         console.error('[Companion] Failed to send decline notification:', notifyError);
@@ -184,7 +180,7 @@ export async function cancelBookingController(req: Request, res: Response) {
             guide.student_id,
             booking.id,
             'cancelled',
-            formatStudentName(req as any)
+            await getStudentDisplayName(freshman_id, 'A student')
           );
         }
       } catch (notifyError) {
@@ -219,7 +215,7 @@ export async function deleteBookingController(req: Request, res: Response) {
             guide.student_id,
             booking.id,
             'cancelled',
-            formatStudentName(req as any)
+            await getStudentDisplayName(freshman_id, 'A student')
           );
         }
       } catch (notifyError) {
@@ -267,7 +263,7 @@ export async function updateBookingController(req: Request, res: Response) {
           recipientStudentId,
           booking.id,
           'rescheduled',
-          formatStudentName((req as any).student || (req as any).user)
+          await getStudentDisplayName(student_id, 'Your companion')
         );
       }
     } catch (notifyError) {
