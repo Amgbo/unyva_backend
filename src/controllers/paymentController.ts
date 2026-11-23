@@ -2,15 +2,22 @@ import { Request, Response } from 'express';
 import axios from 'axios';
 import { pool } from '../db.js';
 import crypto from 'crypto';
+import { AuthRequest } from '../middleware/authMiddleware.js';
 
 // Paystack keys from environment variables
 const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY;
 const PAYSTACK_PUBLIC_KEY = process.env.PAYSTACK_PUBLIC_KEY;
 const PAYSTACK_WEBHOOK_SECRET = process.env.PAYSTACK_WEBHOOK_SECRET;
 
-export const initializePayment = async (req: Request, res: Response): Promise<void> => {
+export const initializePayment = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { email, amount, student_id } = req.body; // amount in pesewas
+    const { email, amount } = req.body ?? {}; // amount in pesewas
+    // Always bind the transaction to the authenticated user, never the request body.
+    const student_id = String(req.user?.id ?? '');
+    if (!student_id) {
+      res.status(401).json({ error: 'Unauthenticated' });
+      return;
+    }
 
     if (!email || !amount) {
       console.warn('❌ Payment init failed: missing email or amount');
@@ -49,24 +56,31 @@ export const initializePayment = async (req: Request, res: Response): Promise<vo
       reference: data.reference,
     });
   } catch (error) {
-    console.error(`❌ Payment initialization error for student ${req.body.student_id}:`, error);
+    console.error(`❌ Payment initialization error for student ${req.user?.id}:`, error);
     res.status(500).json({ error: 'Failed to initialize payment' });
   }
 };
 
-export const verifyPayment = async (req: Request, res: Response): Promise<void> => {
+export const verifyPayment = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { reference, student_id } = req.body;
+    const { reference, student_id: bodyStudentId } = req.body ?? {};
+    // Identity comes from the verified token, not the request body.
+    const student_id = String(req.user?.id ?? '');
+
+    if (!student_id) {
+      res.status(401).json({ error: 'Unauthenticated' });
+      return;
+    }
+
+    if (bodyStudentId != null && String(bodyStudentId) !== student_id) {
+      console.warn(`❌ Verify payment rejected: token user ${student_id} tried to verify for ${bodyStudentId}`);
+      res.status(403).json({ error: 'Cannot verify payment for another student' });
+      return;
+    }
 
     if (!reference || typeof reference !== 'string') {
       console.warn(`❌ Verify payment failed: missing reference for student ${student_id}`);
       res.status(400).json({ error: 'Payment reference is required' });
-      return;
-    }
-
-    if (!student_id) {
-      console.warn('❌ Verify payment failed: missing student_id');
-      res.status(400).json({ error: 'Student ID is required' });
       return;
     }
 
@@ -85,7 +99,7 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
     }
 
     // Verify payment with Paystack
-    const response = await axios.get(`https://api.paystack.co/transaction/verify/${reference}`, {
+    const response = await axios.get(`https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`, {
       headers: {
         Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
         'Content-Type': 'application/json',
@@ -184,14 +198,19 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
       });
     }
   } catch (error) {
-    console.error(`❌ Payment verification error - student: ${req.body.student_id}, ref: ${req.body.reference}:`, error);
+    console.error(`❌ Payment verification error - student: ${req.user?.id}, ref: ${req.body?.reference}:`, error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
 
-export const getPaymentStatus = async (req: Request, res: Response): Promise<void> => {
+export const getPaymentStatus = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { studentId } = req.params;
+
+    if (String(studentId) !== String(req.user?.id ?? '')) {
+      res.status(403).json({ error: 'Cannot view payment status for another student' });
+      return;
+    }
 
     console.log(`📍 Checking payment status - student: ${studentId}`);
 
@@ -289,7 +308,9 @@ export const handleWebhook = async (req: Request, res: Response): Promise<void> 
       .update(rawBody)
       .digest('hex');
 
-    if (hash !== signature) {
+    const hashBuf = Buffer.from(hash, 'utf8');
+    const sigBuf = Buffer.from(String(signature), 'utf8');
+    if (hashBuf.length !== sigBuf.length || !crypto.timingSafeEqual(hashBuf, sigBuf)) {
       console.warn('Invalid Paystack webhook signature');
       res.sendStatus(401);
       return;

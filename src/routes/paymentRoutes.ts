@@ -5,8 +5,10 @@ import { initializePayment, verifyPayment, getPaymentStatus, handleWebhook } fro
 const router = express.Router();
 
 // Payment routes
-router.post('/initialize', authMiddleware, initializePayment);
-router.post('/verify', authMiddleware, verifyPayment);
+// This router is mounted before the global express.json() (so the webhook can
+// read raw bytes), so JSON routes must parse their own bodies.
+router.post('/initialize', express.json(), authMiddleware, initializePayment);
+router.post('/verify', express.json(), authMiddleware, verifyPayment);
 router.get('/status/:studentId', authMiddleware, getPaymentStatus);
 
 // Webhook route - must be placed before body-parser middleware in main app

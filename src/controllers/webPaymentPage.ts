@@ -23,10 +23,10 @@ router.get('/payment-page', (req: Request, res: Response, next: NextFunction): v
 });
 
 // Endpoint to verify payment after checkout
-router.post('/verify-payment', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+// Mounted before the global express.json(), so parse the body here.
+router.post('/verify-payment', express.json(), async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    // Explicitly type req.body
-    const { reference, student_id } = req.body as { reference?: string; student_id?: string };
+    const { reference, student_id } = (req.body ?? {}) as { reference?: string; student_id?: string };
 
     if (!reference || !student_id) {
       res.status(400).json({ error: 'Missing payment reference or student ID' });

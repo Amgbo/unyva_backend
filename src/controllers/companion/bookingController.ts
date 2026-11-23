@@ -1,9 +1,24 @@
 import { Request, Response } from 'express';
-import { acceptBooking, cancelBooking, createNewBooking, declineBooking, getBookingDetails, getBookingsForGuide, getMyBookings, removeBooking, updateBooking } from '../../services/companion/bookingService.js';
+import { acceptBooking, BookingAccessError, cancelBooking, createNewBooking, declineBooking, getBookingDetails, getBookingsForGuide, getMyBookings, removeBooking, updateBooking } from '../../services/companion/bookingService.js';
 import { getGuideById } from '../../models/companion/guideModel.js';
 import { notificationService } from '../../services/notificationService.js';
 import { handleControllerError } from '../../utils/apiError.js';
 import { getStudentDisplayName } from '../../utils/studentName.js';
+
+/**
+ * Send access/not-found/conflict errors from the booking service with their real
+ * status and user-safe message; everything else goes through the generic handler.
+ */
+function handleBookingError(
+  res: Response,
+  e: unknown,
+  opts: Parameters<typeof handleControllerError>[2]
+) {
+  if (e instanceof BookingAccessError) {
+    return res.status(e.status).json({ success: false, error: e.message, message: e.message });
+  }
+  return handleControllerError(res, e, opts);
+}
 
 export async function createBookingController(req: Request, res: Response) {
   try {
@@ -36,7 +51,7 @@ export async function createBookingController(req: Request, res: Response) {
 
     return res.status(201).json({ booking });
   } catch (e: any) {
-    return handleControllerError(res, e, {
+    return handleBookingError(res, e, {
       statusCode: 400,
       publicError: 'Failed to create booking',
       context: 'companion/createBooking',
@@ -52,7 +67,7 @@ export async function listMyBookingsAsFreshmanController(req: Request, res: Resp
     const bookings = await getMyBookings(student_id);
     return res.json({ bookings });
   } catch (e: any) {
-    return handleControllerError(res, e, {
+    return handleBookingError(res, e, {
       statusCode: 400,
       publicError: 'Failed to list bookings',
       context: 'companion/listMyBookingsAsFreshman',
@@ -68,7 +83,7 @@ export async function listMyBookingsController(req: Request, res: Response) {
     const bookings = await getMyBookings(student_id);
     return res.json({ bookings });
   } catch (e: any) {
-    return handleControllerError(res, e, {
+    return handleBookingError(res, e, {
       statusCode: 400,
       publicError: 'Failed to list bookings',
       context: 'companion/listMyBookings',
@@ -78,13 +93,16 @@ export async function listMyBookingsController(req: Request, res: Response) {
 
 export async function listBookingsForGuideController(req: Request, res: Response) {
   try {
+    const student_id = (req as any).student?.student_id || (req as any).user?.student_id;
+    if (!student_id) return res.status(401).json({ error: 'Unauthorized' });
+
     const guideId = req.params.guideId;
     if (!guideId) return res.status(400).json({ error: 'guide_id is required' });
 
-    const bookings = await getBookingsForGuide(guideId);
+    const bookings = await getBookingsForGuide(guideId, student_id);
     return res.json({ bookings });
   } catch (e: any) {
-    return handleControllerError(res, e, {
+    return handleBookingError(res, e, {
       statusCode: 400,
       publicError: 'Failed to list guide bookings',
       context: 'companion/listBookingsForGuide',
@@ -94,10 +112,13 @@ export async function listBookingsForGuideController(req: Request, res: Response
 
 export async function getBookingDetailController(req: Request, res: Response) {
   try {
-    const booking = await getBookingDetails(req.params.id);
+    const student_id = (req as any).student?.student_id || (req as any).user?.student_id;
+    if (!student_id) return res.status(401).json({ error: 'Unauthorized' });
+
+    const booking = await getBookingDetails(req.params.id, student_id);
     return res.json({ booking });
   } catch (e: any) {
-    return handleControllerError(res, e, {
+    return handleBookingError(res, e, {
       statusCode: 400,
       publicError: 'Failed to get booking',
       context: 'companion/getBookingDetail',
@@ -127,7 +148,7 @@ export async function acceptBookingController(req: Request, res: Response) {
 
     return res.json({ booking });
   } catch (e: any) {
-    return handleControllerError(res, e, {
+    return handleBookingError(res, e, {
       statusCode: 400,
       publicError: 'Failed to accept booking',
       context: 'companion/acceptBooking',
@@ -157,7 +178,7 @@ export async function declineBookingController(req: Request, res: Response) {
 
     return res.json({ booking });
   } catch (e: any) {
-    return handleControllerError(res, e, {
+    return handleBookingError(res, e, {
       statusCode: 400,
       publicError: 'Failed to decline booking',
       context: 'companion/declineBooking',
@@ -190,7 +211,7 @@ export async function cancelBookingController(req: Request, res: Response) {
 
     return res.json({ booking });
   } catch (e: any) {
-    return handleControllerError(res, e, {
+    return handleBookingError(res, e, {
       statusCode: 400,
       publicError: 'Failed to cancel booking',
       context: 'companion/cancelBooking',
@@ -225,7 +246,7 @@ export async function deleteBookingController(req: Request, res: Response) {
 
     return res.json({ success: true, booking });
   } catch (e: any) {
-    return handleControllerError(res, e, {
+    return handleBookingError(res, e, {
       statusCode: 400,
       publicError: 'Failed to delete booking',
       context: 'companion/deleteBooking',
@@ -272,7 +293,7 @@ export async function updateBookingController(req: Request, res: Response) {
 
     return res.json({ booking });
   } catch (e: any) {
-    return handleControllerError(res, e, {
+    return handleBookingError(res, e, {
       statusCode: 400,
       publicError: 'Failed to update booking',
       context: 'companion/updateBooking',
