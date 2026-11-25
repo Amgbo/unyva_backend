@@ -5,7 +5,7 @@ import { handleControllerError } from '../../utils/apiError.js';
 
 export async function startSessionController(req: Request, res: Response) {
   try {
-    const student_id = (req as any).student?.student_id;
+    const student_id = (req as any).student?.student_id || (req as any).user?.student_id;
     if (!student_id) return res.status(401).json({ error: 'Unauthorized' });
 
     const { session, pin } = await startFreshmanSession({ bookingId: req.params.bookingId, freshman_id: student_id });
@@ -21,7 +21,7 @@ export async function startSessionController(req: Request, res: Response) {
 
 export async function confirmSessionController(req: Request, res: Response) {
   try {
-    const student_id = (req as any).student?.student_id;
+    const student_id = (req as any).student?.student_id || (req as any).user?.student_id;
     if (!student_id) return res.status(401).json({ error: 'Unauthorized' });
 
     const session = await confirmGuideSession({
@@ -42,7 +42,7 @@ export async function confirmSessionController(req: Request, res: Response) {
 
 export async function endSessionController(req: Request, res: Response) {
   try {
-    const student_id = (req as any).student?.student_id;
+    const student_id = (req as any).student?.student_id || (req as any).user?.student_id;
     if (!student_id) return res.status(401).json({ error: 'Unauthorized' });
 
     const session = await endFreshmanSession({ sessionId: req.params.id, freshman_id: student_id });

@@ -85,6 +85,45 @@ export const getProductOwner = async (productId: number): Promise<string | null>
   }
 };
 
+export interface ProductMessageContext {
+  id: number;
+  title: string;
+  price: string | null;
+  student_price: string | null;
+  status: string | null;
+  image_url: string | null;
+}
+
+// Minimal product info shown at the top of a chat so both sides know which
+// listing the conversation is about.
+export const getProductMessageContext = async (productId: number): Promise<ProductMessageContext | null> => {
+  try {
+    const query = `
+      SELECT
+        p.id,
+        p.title,
+        p.price,
+        p.student_price,
+        p.status,
+        (
+          SELECT pi.image_url
+          FROM product_images pi
+          WHERE pi.product_id = p.id
+          ORDER BY pi.is_primary DESC NULLS LAST, pi.upload_order ASC NULLS LAST
+          LIMIT 1
+        ) AS image_url
+      FROM products p
+      WHERE p.id = $1
+    `;
+
+    const result = await pool.query(query, [productId]);
+    return result.rows[0] ?? null;
+  } catch (error) {
+    console.error('Database error in getProductMessageContext:', error);
+    throw error;
+  }
+};
+
 // Get the last buyer who sent a message for a product (for seller replies)
 export const getLastBuyerForProduct = async (productId: number, sellerId: string): Promise<string | null> => {
   try {

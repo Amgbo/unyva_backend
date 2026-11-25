@@ -11,7 +11,39 @@ export type CompanionMessage = {
   content: string;
   is_read: boolean;
   created_at: string;
+  found_item_id?: number | null;
+  found_item?: FoundItemSummary | null;
 };
+
+/** Minimal found-item info shown on a chat message sent about that item. */
+export type FoundItemSummary = {
+  id: number;
+  title: string;
+  category: string;
+  status: string;
+  image: unknown; // first entry of found_items.images (URL string or object)
+  location: string | null;
+};
+
+// Builds the found_item JSON object (or NULL) for a message row aliased "cm".
+const FOUND_ITEM_JSON = `
+  CASE WHEN fi.id IS NULL THEN NULL ELSE json_build_object(
+    'id', fi.id,
+    'title', fi.title,
+    'category', fi.category,
+    'status', fi.status,
+    'image', fi.images->0,
+    'location', fi.location_description
+  ) END AS found_item`;
+
+export async function getFoundItemSummary(foundItemId: number): Promise<(FoundItemSummary & { student_id: string }) | null> {
+  const { rows } = await pool.query(
+    `SELECT id, student_id, title, category, status, images->0 AS image, location_description AS location
+     FROM found_items WHERE id = $1`,
+    [foundItemId]
+  );
+  return rows[0] ?? null;
+}
 
 export async function sendMessage(params: {
   booking_id: string;
@@ -19,16 +51,22 @@ export async function sendMessage(params: {
   receiver_id: string;
   content: string;
   thread_type?: ThreadType;
+  found_item_id?: number | null;
 }): Promise<CompanionMessage> {
-  const { booking_id, sender_id, receiver_id, content, thread_type = 'booking' } = params;
+  const { booking_id, sender_id, receiver_id, content, thread_type = 'booking', found_item_id = null } = params;
 
   const { rows } = await pool.query(
     `
-    INSERT INTO companion_messages (booking_id, sender_id, receiver_id, content, thread_type)
-    VALUES ($1, $2, $3, $4, $5)
-    RETURNING *;
+    WITH inserted AS (
+      INSERT INTO companion_messages (booking_id, sender_id, receiver_id, content, thread_type, found_item_id)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING *
+    )
+    SELECT cm.*, ${FOUND_ITEM_JSON}
+    FROM inserted cm
+    LEFT JOIN found_items fi ON fi.id = cm.found_item_id;
     `,
-    [booking_id, sender_id, receiver_id, content, thread_type]
+    [booking_id, sender_id, receiver_id, content, thread_type, found_item_id]
   );
 
   return rows[0] as CompanionMessage;
@@ -50,10 +88,11 @@ export async function getMessagesForBooking(bookingId: string): Promise<Companio
 export async function getMessagesForThread(threadId: string): Promise<CompanionMessage[]> {
   const { rows } = await pool.query(
     `
-    SELECT *
-    FROM companion_messages
-    WHERE booking_id = $1
-    ORDER BY created_at ASC;
+    SELECT cm.*, ${FOUND_ITEM_JSON}
+    FROM companion_messages cm
+    LEFT JOIN found_items fi ON fi.id = cm.found_item_id
+    WHERE cm.booking_id = $1
+    ORDER BY cm.created_at ASC;
     `,
     [threadId]
   );

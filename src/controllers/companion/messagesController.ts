@@ -1,13 +1,15 @@
 import { Request, Response } from 'express';
 import {
   countUnreadMessages,
-  getBookingMessages,
   getThreadMessages,
+  getThreadParticipants,
+  isThreadParticipant,
   getUserDmThreads,
   markMessagesRead,
   sendCompanionMessage,
   sendDirectMessage,
 } from '../../services/companion/companionMessageService.js';
+import { getFoundItemSummary } from '../../models/companion/companionMessageModel.js';
 import { notificationService } from '../../services/notificationService.js';
 import { handleControllerError } from '../../utils/apiError.js';
 import { getStudentDisplayName } from '../../utils/studentName.js';
@@ -22,85 +24,70 @@ export async function sendMessageController(req: Request, res: Response) {
     const sender_id = (req as any).student?.student_id || (req as any).user?.student_id;
     if (!sender_id) return res.status(401).json({ error: 'Unauthorized' });
 
-    let receiver_id = req.body.receiver_id;
-    const booking_id = req.body.booking_id;
-    const content = req.body.content;
+    const sender = String(sender_id);
+    let receiver_id: string | undefined = req.body.receiver_id != null ? String(req.body.receiver_id) : undefined;
+    const booking_id = req.body.booking_id != null ? String(req.body.booking_id) : '';
+    const content = typeof req.body.content === 'string' ? req.body.content : '';
 
-    if (!content || !content.trim()) {
+    if (!content.trim()) {
       return res.status(400).json({ error: 'Missing content' });
     }
 
     const { pool } = await import('../../db.js');
 
     let message;
-    let threadId;
+    let threadId: string;
 
-    // Check if booking_id is provided and what type it is
-    if (booking_id && !String(booking_id).startsWith('dm:')) {
-      // 1. Genuine booking message
-      threadId = String(booking_id);
-
-      // Look up booking participants
-      const bookingRes = await pool.query(
-        `SELECT b.id, b.freshman_id, b.guide_id, g.student_id AS guide_student_id
-         FROM bookings b
-         LEFT JOIN guides g ON b.guide_id = g.id
-         WHERE b.id = $1`,
-        [threadId]
-      );
-
-      if (bookingRes.rows.length > 0) {
-        const b = bookingRes.rows[0];
-        // If sender is the freshman, receiver is the guide
-        if (sender_id === b.freshman_id) {
-          receiver_id = b.guide_student_id;
-        } else if (sender_id === b.guide_student_id) {
-          // If sender is the guide, receiver is the freshman
-          receiver_id = b.freshman_id;
-        } else if (receiver_id === b.guide_id) {
-          // If receiver_id matches guide UUID, map to guide_student_id
-          receiver_id = b.guide_student_id;
-        }
+    if (booking_id && !booking_id.startsWith('dm:')) {
+      // 1. Booking thread: only the booking student and the guide may post, and
+      //    the recipient is always the other participant (body receiver_id ignored).
+      threadId = booking_id;
+      const participants = await getThreadParticipants(threadId);
+      if (!participants) {
+        return res.status(404).json({ error: 'Conversation not found' });
+      }
+      if (!participants.includes(sender)) {
+        return res.status(403).json({ error: 'You are not part of this conversation' });
       }
 
-      // If receiver_id was passed as a guide UUID, resolve it
-      if (receiver_id) {
-        const guideLookup = await pool.query('SELECT student_id FROM guides WHERE id::text = $1', [receiver_id]);
-        if (guideLookup.rows.length > 0) {
-          receiver_id = guideLookup.rows[0].student_id;
-        }
-      }
-
+      receiver_id = participants.find((p) => p !== sender);
       if (!receiver_id) {
         return res.status(400).json({ error: 'Cannot determine recipient for this booking' });
       }
 
       message = await sendCompanionMessage({
         booking_id: threadId,
-        sender_id,
+        sender_id: sender,
         receiver_id,
         content: content.trim(),
         thread_type: 'booking',
       });
     } else {
-      // 2. Direct message thread (either booking_id is dm:... or direct DM)
-      const rawThreadId = booking_id && String(booking_id).startsWith('dm:') ? String(booking_id) : null;
-
-      if (rawThreadId && (!receiver_id || receiver_id === sender_id)) {
-        const parts = rawThreadId.replace(/^dm:/, '').split(':');
-        receiver_id = parts.find((p) => p !== sender_id) || receiver_id;
-      }
-
-      // If receiver_id was passed as a guide UUID, resolve to their student_id
-      if (receiver_id) {
+      // 2. Direct message thread.
+      if (booking_id) {
+        // Existing DM thread: sender must be one of its two members; the
+        // recipient is the other member.
+        const participants = await getThreadParticipants(booking_id);
+        if (!participants) {
+          return res.status(400).json({ error: 'Invalid conversation id' });
+        }
+        if (!participants.includes(sender)) {
+          return res.status(403).json({ error: 'You are not part of this conversation' });
+        }
+        receiver_id = participants.find((p) => p !== sender);
+      } else if (receiver_id) {
+        // New DM: receiver may be given as a guide id; resolve to its student_id.
         const guideLookup = await pool.query('SELECT student_id FROM guides WHERE id::text = $1', [receiver_id]);
         if (guideLookup.rows.length > 0) {
-          receiver_id = guideLookup.rows[0].student_id;
+          receiver_id = String(guideLookup.rows[0].student_id);
         }
       }
 
       if (!receiver_id) {
         return res.status(400).json({ error: 'Missing receiver_id' });
+      }
+      if (receiver_id === sender) {
+        return res.status(400).json({ error: 'You cannot message yourself' });
       }
 
       // Verify recipient exists in students table
@@ -109,12 +96,35 @@ export async function sendMessageController(req: Request, res: Response) {
         return res.status(404).json({ error: 'Recipient user not found' });
       }
 
-      threadId = rawThreadId || buildDirectThreadId(sender_id, receiver_id);
+      // Keep an existing (already membership-checked) thread id as-is so stored
+      // history isn't split; otherwise build the canonical id.
+      // Optional found-item reference: the item must exist and have been posted
+      // by one of the two people in this chat.
+      let foundItemId: number | null = null;
+      const rawFoundItemId = req.body.found_item_id;
+      if (rawFoundItemId != null && rawFoundItemId !== '') {
+        const parsed = Number(rawFoundItemId);
+        if (!Number.isInteger(parsed) || parsed <= 0) {
+          return res.status(400).json({ error: 'Invalid found_item_id' });
+        }
+        const item = await getFoundItemSummary(parsed);
+        if (!item) {
+          return res.status(404).json({ error: 'Found item not found' });
+        }
+        const poster = String(item.student_id ?? '');
+        if (poster !== sender && poster !== receiver_id) {
+          return res.status(400).json({ error: 'That item was not posted by anyone in this conversation' });
+        }
+        foundItemId = parsed;
+      }
+
+      threadId = booking_id || buildDirectThreadId(sender, receiver_id);
       message = await sendDirectMessage({
         sender_id,
         receiver_id,
         content: content.trim(),
         thread_id: threadId,
+        found_item_id: foundItemId,
       });
     }
 
@@ -142,7 +152,14 @@ export async function sendMessageController(req: Request, res: Response) {
 
 export async function getMessagesController(req: Request, res: Response) {
   try {
+    const userId = (req as any).student?.student_id || (req as any).user?.student_id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
     const threadId = req.params.bookingId; // Can be a booking ID or a DM thread ID
+    // Only members of the thread may read it; don't reveal whether it exists.
+    if (!(await isThreadParticipant(threadId, userId))) {
+      return res.status(404).json({ error: 'Conversation not found' });
+    }
     const messages = await getThreadMessages(threadId);
     return res.json({ messages });
   } catch (e: any) {
@@ -215,11 +232,21 @@ export async function getDmInboxController(req: Request, res: Response) {
         s.profile_picture,
         s.hall_of_residence,
         s.program,
-        cm.content AS last_message
+        cm.content AS last_message,
+        fi_latest.id AS found_item_id,
+        fi_latest.title AS found_item_title
       FROM thread_summary ts
       LEFT JOIN students s ON ts.other_user_id = s.student_id
       LEFT JOIN companion_messages cm ON cm.booking_id = ts.thread_id
         AND cm.created_at = ts.last_message_time
+      LEFT JOIN LATERAL (
+        SELECT fi.id, fi.title
+        FROM companion_messages m3
+        JOIN found_items fi ON fi.id = m3.found_item_id
+        WHERE m3.booking_id = ts.thread_id
+        ORDER BY m3.created_at DESC
+        LIMIT 1
+      ) fi_latest ON true
       ORDER BY ts.last_message_time DESC`,
       [userId]
     );
@@ -231,6 +258,7 @@ export async function getDmInboxController(req: Request, res: Response) {
       last_message: row.last_message || '',
       last_message_time: row.last_message_time,
       unread_count: parseInt(row.unread_count) || 0,
+      found_item: row.found_item_id ? { id: row.found_item_id, title: row.found_item_title } : null,
       other_user_profile: {
         first_name: row.first_name || 'Companion',
         last_name: row.last_name || 'User',

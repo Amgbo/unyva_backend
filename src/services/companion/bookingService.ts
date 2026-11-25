@@ -17,7 +17,7 @@ import { getGuideById } from '../../models/companion/guideModel.js';
  * Controllers translate it into a response instead of a generic 400/500.
  */
 export class BookingAccessError extends Error {
-  constructor(public readonly status: 403 | 404 | 409, message: string) {
+  constructor(public readonly status: 400 | 403 | 404 | 409, message: string) {
     super(message);
     this.name = 'BookingAccessError';
   }

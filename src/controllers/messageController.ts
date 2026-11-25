@@ -8,6 +8,7 @@ import {
   getProductOwner,
   getLastBuyerForProduct,
   getSellerInbox,
+  getProductMessageContext,
   markMessagesAsRead,
   CreateMessageData
 } from '../models/productMessageModel.js';
@@ -218,13 +219,17 @@ export const getProductMessages = async (req: AuthRequest, res: Response): Promi
     // Mark messages as read for this user
     await markMessagesAsRead(productIdNum, userId);
 
-    // Get messages
-    const messages = await getMessagesForProduct(productIdNum);
+    // Get messages plus the product the conversation is about
+    const [messages, product] = await Promise.all([
+      getMessagesForProduct(productIdNum),
+      getProductMessageContext(productIdNum),
+    ]);
 
     res.status(200).json({
       success: true,
       count: messages.length,
-      messages
+      messages,
+      product
     });
   } catch (error) {
     console.error('❌ Error fetching messages:', error);
